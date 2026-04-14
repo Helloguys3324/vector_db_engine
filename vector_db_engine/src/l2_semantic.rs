@@ -245,12 +245,11 @@ impl SemanticEngine {
             "attention_mask" => ort::value::Tensor::from_array(tensor_mask).map_err(|err| err.to_string())?
         ];
 
-        let outputs = self
+        let mut session_guard = self
             .session
             .lock()
-            .map_err(|_| "Failed to lock ONNX session".to_string())?
-            .run(inputs)
-            .map_err(|err| err.to_string())?;
+            .map_err(|_| "Failed to lock ONNX session".to_string())?;
+        let outputs = session_guard.run(inputs).map_err(|err| err.to_string())?;
 
         let embedding_tuple = outputs["last_hidden_state"]
             .try_extract_tensor::<f32>()
