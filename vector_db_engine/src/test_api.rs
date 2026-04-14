@@ -1,4 +1,3 @@
-fn test() {
-    let session: std::sync::Arc<ort::session::Session> = unimplemented!();
-    let _: () = session.run;
+fn main() {
+    let _: qdrant_client::client::QdrantClient;
 }
