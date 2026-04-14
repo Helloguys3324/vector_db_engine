@@ -1,11 +1,11 @@
 use ndarray::Array2;
 use ort::session::{builder::GraphOptimizationLevel, Session};
-use std::sync::Arc;
+use std::sync::Mutex;
 use tokenizers::Tokenizer;
 
 /// L2 Semantic Smart-Path
 pub struct SemanticEngine {
-    session: Arc<Session>,
+    session: Mutex<Session>,
     tokenizer: Tokenizer,
     threshold: f32,
 }
@@ -25,7 +25,7 @@ impl SemanticEngine {
             .expect("Failed to load tokenizer.json");
 
         Ok(Self {
-            session: Arc::new(session),
+            session: Mutex::new(session),
             tokenizer,
             threshold,
         })
@@ -61,7 +61,7 @@ impl SemanticEngine {
             "attention_mask" => ort::value::Tensor::from_array(tensor_mask).unwrap()
         ];
 
-        if let Ok(outputs) = self.session.run(inputs) {
+        if let Ok(outputs) = self.session.lock().unwrap().run(inputs) {
             if let Ok(embedding_tuple) = outputs["last_hidden_state"].try_extract_tensor::<f32>() {
                 // embedding_tuple is (&Shape, &[f32])
                 let emb_slice = embedding_tuple.1;
