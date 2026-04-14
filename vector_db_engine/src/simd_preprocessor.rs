@@ -158,6 +158,50 @@ fn is_consonant_heavy(text: &str) -> bool {
     (vowels as f32 / text.len() as f32) <= 0.22
 }
 
+fn collapse_repeated_runs_with_limit(text: &str, max_run: usize) -> String {
+    if text.is_empty() || max_run == 0 {
+        return String::new();
+    }
+
+    let mut out = String::with_capacity(text.len());
+    let mut prev: Option<char> = None;
+    let mut run = 0usize;
+
+    for ch in text.chars() {
+        if prev == Some(ch) {
+            run += 1;
+        } else {
+            prev = Some(ch);
+            run = 1;
+        }
+
+        if run > max_run {
+            continue;
+        }
+        out.push(ch);
+    }
+
+    out
+}
+
+fn canonicalize_obfuscated_candidate(token: &str) -> Option<String> {
+    let mut softened = collapse_repeated_runs_with_limit(token, 2);
+    if softened.is_empty() {
+        return None;
+    }
+
+    if softened.len() >= 5 && softened.ends_with("ie") {
+        softened.truncate(softened.len() - 2);
+        softened.push('y');
+    }
+
+    if softened != token {
+        Some(softened)
+    } else {
+        None
+    }
+}
+
 fn normalize_with_spaces(text: &str, collapse_repeats: bool) -> String {
     if text.is_empty() {
         return String::new();
@@ -238,6 +282,23 @@ fn extract_candidates(text: &str, collapse_repeats: bool) -> Vec<Candidate> {
             });
             if candidates.len() >= MAX_CANDIDATES {
                 return candidates;
+            }
+        }
+
+        if obfuscated {
+            if let Some(canonicalized) = canonicalize_obfuscated_candidate(&compacted) {
+                if canonicalized.len() >= 2
+                    && canonicalized.len() <= MAX_TOKEN_LEN
+                    && seen.insert(canonicalized.clone())
+                {
+                    candidates.push(Candidate {
+                        text: canonicalized,
+                        obfuscated: true,
+                    });
+                    if candidates.len() >= MAX_CANDIDATES {
+                        return candidates;
+                    }
+                }
             }
         }
 
@@ -334,5 +395,15 @@ mod tests {
             .merged_candidates()
             .iter()
             .any(|c| c.text == "nigga" && c.obfuscated));
+    }
+
+    #[test]
+    fn canonicalizes_pusssie_into_pussy_candidate() {
+        let mut buffer = SimdBuffer::new();
+        buffer.normalize_adversarial_text("pusssie");
+        assert!(buffer
+            .merged_candidates()
+            .iter()
+            .any(|c| c.text == "pussy" && c.obfuscated));
     }
 }

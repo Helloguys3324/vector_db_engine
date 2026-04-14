@@ -29,6 +29,28 @@ impl ModerationEngine {
             .expect("Failed to initialize L2 Semantic Engine");
         let parity = JsParityEngine::new(patterns);
 
+        let profanity_seed_limit = std::env::var("OMEGA_PROFANITY_VECTOR_SEED_LIMIT")
+            .ok()
+            .and_then(|raw| raw.parse::<usize>().ok())
+            .map(|limit| limit.clamp(0, 25_000))
+            .unwrap_or(2_000);
+        if profanity_seed_limit > 0 {
+            let seed_terms = parity.profanity_seed_terms(profanity_seed_limit);
+            if !seed_terms.is_empty() {
+                match semantic.bootstrap_profanity_lexicon(&seed_terms).await {
+                    Ok(inserted) => {
+                        println!(
+                            "🧠 Seeded {} profanity vectors for 80% semantic matching.",
+                            inserted
+                        );
+                    }
+                    Err(err) => {
+                        eprintln!("⚠️ Failed to seed profanity vectors: {}", err);
+                    }
+                }
+            }
+        }
+
         Self {
             dfa: DfaEngine::new(patterns),
             parity,
@@ -62,7 +84,22 @@ impl ModerationEngine {
             return analysis.is_profane;
         }
 
-        // Step 2: Run vector fallback only when lexical path does not match
+        // Step 2: Probe semantic profanity similarity (>= 0.80) for unresolved obfuscated tokens.
+        let profanity_candidates = self.parity.profanity_vector_candidates(
+            payload,
+            buffer.merged_candidates(),
+            analysis.surface,
+        );
+        if !profanity_candidates.is_empty()
+            && self
+                .semantic
+                .scan_profanity_candidates(&profanity_candidates)
+                .await
+        {
+            return true;
+        }
+
+        // Step 3: Run broad vector fallback only when lexical path does not match
         // and the same JS-like gate conditions are met.
         if self
             .parity

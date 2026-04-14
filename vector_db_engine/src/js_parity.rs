@@ -593,6 +593,107 @@ impl JsParityEngine {
         has_link || has_money || has_urgency || token_count >= self.vector_fallback_min_tokens + 2
     }
 
+    pub fn profanity_seed_terms(&self, max_terms: usize) -> Vec<String> {
+        if max_terms == 0 {
+            return Vec::new();
+        }
+
+        let mut buckets: Vec<Vec<String>> = vec![Vec::new(); 26];
+        let mut misc = Vec::<String>::new();
+        for word in &self.bad_word_set {
+            if word.len() < self.min_match_length || word.len() > 24 {
+                continue;
+            }
+            if self.whitelist_set.contains(word) {
+                continue;
+            }
+            if let Some(idx) = letter_bucket_index(word) {
+                buckets[idx].push(word.clone());
+            } else {
+                misc.push(word.clone());
+            }
+        }
+
+        for bucket in &mut buckets {
+            bucket.sort_unstable();
+        }
+        misc.sort_unstable();
+
+        let mut out = Vec::<String>::with_capacity(max_terms);
+        let mut cursor = 0usize;
+        let mut progressed = true;
+
+        while out.len() < max_terms && progressed {
+            progressed = false;
+            for bucket in &buckets {
+                if out.len() >= max_terms {
+                    break;
+                }
+                if cursor < bucket.len() {
+                    out.push(bucket[cursor].clone());
+                    progressed = true;
+                }
+            }
+            if out.len() >= max_terms {
+                break;
+            }
+            if cursor < misc.len() {
+                out.push(misc[cursor].clone());
+                progressed = true;
+            }
+            cursor += 1;
+        }
+
+        out
+    }
+
+    pub fn profanity_vector_candidates(
+        &self,
+        text: &str,
+        merged_candidates: &[Candidate],
+        surface: SurfaceSignals,
+    ) -> Vec<String> {
+        if !self.enable_vector_fallback || merged_candidates.is_empty() {
+            return Vec::new();
+        }
+
+        let token_count = text
+            .split_whitespace()
+            .filter(|segment| !segment.is_empty())
+            .count();
+        if token_count > 8 && !surface.leet && !surface.hard_separator {
+            return Vec::new();
+        }
+
+        let mut seen = HashSet::<String>::new();
+        let mut out = Vec::<String>::new();
+
+        for candidate in merged_candidates.iter().take(32) {
+            let token = candidate.text.as_str();
+            if token.len() < self.min_match_length || token.len() > 24 {
+                continue;
+            }
+            if self.bad_word_set.contains(token) || self.whitelist_set.contains(token) {
+                continue;
+            }
+            if !candidate.obfuscated && !surface.leet && !surface.hard_separator && !surface.digit {
+                continue;
+            }
+            if self.is_known_clean_word(token) {
+                continue;
+            }
+
+            if seen.insert(token.to_string()) {
+                out.push(token.to_string());
+                if out.len() >= 8 {
+                    break;
+                }
+            }
+        }
+
+        out
+    }
+
     fn evaluate_detection(
         &self,
         text: &str,
@@ -1755,6 +1856,30 @@ mod tests {
         let parity = JsParityEngine::new(&patterns);
 
         let text = "ng";
+        let native_raw_hit = dfa.scan(text);
+
+        let mut buffer = SimdBuffer::new();
+        buffer.normalize_adversarial_text(text);
+
+        let analysis = parity.analyze(
+            text,
+            native_raw_hit,
+            buffer.strict_candidates(),
+            buffer.collapsed_candidates(),
+            buffer.merged_candidates(),
+        );
+
+        assert!(analysis.matched);
+        assert!(analysis.is_profane);
+    }
+
+    #[test]
+    fn detects_pusssie_variant() {
+        let patterns = ["pussy"];
+        let dfa = DfaEngine::new(&patterns);
+        let parity = JsParityEngine::new(&patterns);
+
+        let text = "pusssie";
         let native_raw_hit = dfa.scan(text);
 
         let mut buffer = SimdBuffer::new();
