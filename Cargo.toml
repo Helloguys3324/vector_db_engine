@@ -7,7 +7,7 @@ edition = "2021"
 crossbeam-queue = "0.3.11"
 crossbeam-utils = "0.8.19"
 aho-corasick = "1.1"
-ort = { version = "2.0.0-rc.8", default-features = false, features = ["ndarray", "download-binaries", "tls-rustls"] }
+ort = { version = "2.0.0-rc.8", features = ["ndarray", "download-binaries", "tls-rustls"] }
 ndarray = "0.15"
 tokenizers = "0.15"
 # hnsw_rs = "0.1" - Using standard vector cosine simulation for demo purposes
