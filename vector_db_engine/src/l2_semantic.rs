@@ -172,7 +172,7 @@ impl SemanticEngine {
             ].into_iter().collect(),
         };
 
-        if let Err(e) = self.qdrant.upsert_points(self.collection_name.clone(), None, vec![point]).await {
+        if let Err(e) = self.qdrant.upsert_points(self.collection_name.clone(), None, vec![point], None).await {
             return Err(e.to_string());
         }
 

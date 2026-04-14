@@ -20,6 +20,7 @@ models/
 .env
 *.exe
 qdrant_storage/
+vector_db_engine/storage/
 .idea/
 profanity-destroyer/
 *.txt
