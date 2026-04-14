@@ -14,7 +14,7 @@ pub struct ModerationEngine {
 }
 
 impl ModerationEngine {
-    pub fn new(patterns: &[&str], queue_capacity: usize, model_path: &str, tokenizer_path: &str) -> Self {
+    pub fn new(patterns: &[&str], queue_capacity: usize, _model_path: &str, _tokenizer_path: &str) -> Self {
         Self {
             dfa: DfaEngine::new(patterns),
             queue: HandoffQueue::new(queue_capacity),
