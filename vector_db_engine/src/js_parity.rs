@@ -46,13 +46,10 @@ const URGENCY_TOKENS: [&str; 11] = [
     "security",
 ];
 
-const EMBEDDED_EN_JSON: &str = include_str!("../../profanity-destroyer/en.json");
-const EMBEDDED_LEGACY_EXTERNAL_JSON: &str =
-    include_str!("../../profanity-destroyer/src/database/external/merged-external.json");
-const EMBEDDED_ABR_JSON: &str =
-    include_str!("../../profanity-destroyer/src/database/external/abr.json");
-const EMBEDDED_DECISION_MODEL_JSON: &str =
-    include_str!("../../profanity-destroyer/src/config/decision-model.json");
+const EMBEDDED_EN_JSON: &str = include_str!("embedded_js/en.json");
+const EMBEDDED_LEGACY_EXTERNAL_JSON: &str = include_str!("embedded_js/merged-external.json");
+const EMBEDDED_ABR_JSON: &str = include_str!("embedded_js/abr.json");
+const EMBEDDED_DECISION_MODEL_JSON: &str = include_str!("embedded_js/decision-model.json");
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Decision {

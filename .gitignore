@@ -17,6 +17,7 @@ Cargo.lock
 models/
 *.onnx
 *.json
+!vector_db_engine/src/embedded_js/*.json
 .env
 *.exe
 qdrant_storage/

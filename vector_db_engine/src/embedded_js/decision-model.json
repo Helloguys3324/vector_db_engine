@@ -1,0 +1,39 @@
+{
+  "version": 4,
+  "reviewThreshold": 0.15,
+  "blockThreshold": 0.25,
+  "features": {
+    "bias": -1.977544,
+    "nativeExact": 6.527671,
+    "exact": 5.90314,
+    "fuzzyStrong": 2.624151,
+    "fuzzyWeak": 0.926993,
+    "skeleton": -0.254495,
+    "obfuscated": -0.378307,
+    "hardSeparator": 2.934235,
+    "leet": 0.091841,
+    "digit": 1.4017,
+    "hyphenOnly": -1.034374,
+    "apostrophe": -1.432345,
+    "alphaOnly": -2.070695,
+    "likelyClean": -1.359141,
+    "shortToken": -0.322736,
+    "longToken": 0.291107
+  },
+  "training": {
+    "dataset": {
+      "total": 34110,
+      "train": 27970,
+      "validation": 6140,
+      "positives": 6348,
+      "negatives": 27762
+    },
+    "validation": {
+      "threshold": 0.25,
+      "precision": 0.9812,
+      "recall": 0.9466,
+      "f1": 0.9636,
+      "f05": 0.9741
+    }
+  }
+}
