@@ -2,7 +2,7 @@ use crate::simd_preprocessor::{normalize_token, Candidate};
 use serde::Deserialize;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use unicode_normalization::UnicodeNormalization;
 
@@ -45,6 +45,14 @@ const URGENCY_TOKENS: [&str; 11] = [
     "investment",
     "security",
 ];
+
+const EMBEDDED_EN_JSON: &str = include_str!("../../profanity-destroyer/en.json");
+const EMBEDDED_LEGACY_EXTERNAL_JSON: &str =
+    include_str!("../../profanity-destroyer/src/database/external/merged-external.json");
+const EMBEDDED_ABR_JSON: &str =
+    include_str!("../../profanity-destroyer/src/database/external/abr.json");
+const EMBEDDED_DECISION_MODEL_JSON: &str =
+    include_str!("../../profanity-destroyer/src/config/decision-model.json");
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Decision {
@@ -383,51 +391,74 @@ pub struct JsParityEngine {
 }
 
 impl JsParityEngine {
-    pub fn new(patterns: &[&str], repo_root: &Path) -> Self {
+    pub fn new(patterns: &[&str]) -> Self {
         let min_match_length = DEFAULT_MIN_MATCH_LENGTH;
-        let profanity_root = repo_root.join("profanity-destroyer");
-        let en_path = profanity_root.join("en.json");
-        let legacy_external_path = profanity_root
-            .join("src")
-            .join("database")
-            .join("external")
-            .join("merged-external.json");
-        let slang_abbr_path = profanity_root
-            .join("src")
-            .join("database")
-            .join("external")
-            .join("abr.json");
-        let clean_lexicon_path = profanity_root.join("Largest.list.of.english.words.txt");
+        let profanity_root = resolve_profanity_root();
+        let en_path = profanity_root.as_ref().map(|root| root.join("en.json"));
+        let legacy_external_path = profanity_root.as_ref().map(|root| {
+            root.join("src")
+                .join("database")
+                .join("external")
+                .join("merged-external.json")
+        });
+        let slang_abbr_path = profanity_root.as_ref().map(|root| {
+            root.join("src")
+                .join("database")
+                .join("external")
+                .join("abr.json")
+        });
+        let clean_lexicon_path = profanity_root
+            .as_ref()
+            .map(|root| root.join("Largest.list.of.english.words.txt"));
         let whitelist_path = profanity_root
-            .join("src")
-            .join("database")
-            .join("whitelist.txt");
+            .as_ref()
+            .map(|root| root.join("src").join("database").join("whitelist.txt"));
         let decision_model_path = profanity_root
-            .join("src")
-            .join("config")
-            .join("decision-model.json");
+            .as_ref()
+            .map(|root| root.join("src").join("config").join("decision-model.json"));
 
         let mut bad_word_set = HashSet::<String>::new();
-
         let mut short_acronym_set = HashSet::<String>::new();
         let mut aggressive_short_acronym_set = HashSet::<String>::new();
-        Self::ingest_en_database(
-            &en_path,
+
+        Self::ingest_en_database_from_str(
+            EMBEDDED_EN_JSON,
             min_match_length,
             &mut bad_word_set,
             &mut short_acronym_set,
             &mut aggressive_short_acronym_set,
         );
+        if let Some(path) = en_path.as_deref() {
+            Self::ingest_en_database(
+                path,
+                min_match_length,
+                &mut bad_word_set,
+                &mut short_acronym_set,
+                &mut aggressive_short_acronym_set,
+            );
+        }
+
         let exclude_legacy_external =
             std::env::var("OMEGA_EXCLUDE_LEGACY_EXTERNAL").unwrap_or_default() == "1";
         if !exclude_legacy_external {
-            Self::ingest_legacy_external(
-                &legacy_external_path,
+            Self::ingest_legacy_external_from_str(
+                EMBEDDED_LEGACY_EXTERNAL_JSON,
                 min_match_length,
                 &mut bad_word_set,
             );
+            if let Some(path) = legacy_external_path.as_deref() {
+                Self::ingest_legacy_external(path, min_match_length, &mut bad_word_set);
+            }
         }
-        Self::ingest_slang_abbreviations(&slang_abbr_path, min_match_length, &mut bad_word_set);
+
+        Self::ingest_slang_abbreviations_from_str(
+            EMBEDDED_ABR_JSON,
+            min_match_length,
+            &mut bad_word_set,
+        );
+        if let Some(path) = slang_abbr_path.as_deref() {
+            Self::ingest_slang_abbreviations(path, min_match_length, &mut bad_word_set);
+        }
 
         // If JS sources are unavailable, fall back to precompiled Rust patterns.
         if bad_word_set.is_empty() {
@@ -439,9 +470,14 @@ impl JsParityEngine {
             }
         }
 
-        let whitelist_set = Self::load_whitelist(&whitelist_path);
-        let (top_words, clean_bloom) =
-            Self::load_clean_lexicon_assets(&clean_lexicon_path, DEFAULT_CLEAN_LEXICON_LIMIT);
+        let whitelist_set = whitelist_path
+            .as_deref()
+            .map(Self::load_whitelist)
+            .unwrap_or_default();
+        let (top_words, clean_bloom) = clean_lexicon_path
+            .as_deref()
+            .map(|path| Self::load_clean_lexicon_assets(path, DEFAULT_CLEAN_LEXICON_LIMIT))
+            .unwrap_or((Vec::new(), None));
         let clean_word_set = top_words
             .into_iter()
             .map(|word| normalize_token(&word, false))
@@ -452,7 +488,13 @@ impl JsParityEngine {
         let (bad_words_by_len_edge, bad_skeletons_by_len_head) =
             Self::build_bad_word_indexes(&bad_word_set, min_match_length);
 
-        let decision_model = Self::load_decision_model(&decision_model_path);
+        let mut decision_model = Self::load_decision_model_from_str(
+            EMBEDDED_DECISION_MODEL_JSON,
+            DecisionModel::default(),
+        );
+        if let Some(path) = decision_model_path.as_deref() {
+            decision_model = Self::load_decision_model(path, decision_model);
+        }
 
         Self {
             min_match_length,
@@ -961,6 +1003,22 @@ impl JsParityEngine {
         let Ok(raw) = fs::read_to_string(path) else {
             return;
         };
+        Self::ingest_en_database_from_str(
+            &raw,
+            min_match_length,
+            bad_word_set,
+            short_acronym_set,
+            aggressive_short_acronym_set,
+        );
+    }
+
+    fn ingest_en_database_from_str(
+        raw: &str,
+        min_match_length: usize,
+        bad_word_set: &mut HashSet<String>,
+        short_acronym_set: &mut HashSet<String>,
+        aggressive_short_acronym_set: &mut HashSet<String>,
+    ) {
         let Ok(entries) = serde_json::from_str::<Vec<RawDbEntry>>(&raw) else {
             return;
         };
@@ -1020,6 +1078,14 @@ impl JsParityEngine {
         let Ok(raw) = fs::read_to_string(path) else {
             return;
         };
+        Self::ingest_legacy_external_from_str(&raw, min_match_length, bad_word_set);
+    }
+
+    fn ingest_legacy_external_from_str(
+        raw: &str,
+        min_match_length: usize,
+        bad_word_set: &mut HashSet<String>,
+    ) {
         let Ok(entries) = serde_json::from_str::<Vec<RawLegacyEntry>>(&raw) else {
             return;
         };
@@ -1056,6 +1122,14 @@ impl JsParityEngine {
         let Ok(raw) = fs::read_to_string(path) else {
             return;
         };
+        Self::ingest_slang_abbreviations_from_str(&raw, min_match_length, bad_word_set);
+    }
+
+    fn ingest_slang_abbreviations_from_str(
+        raw: &str,
+        min_match_length: usize,
+        bad_word_set: &mut HashSet<String>,
+    ) {
         let Ok(map) = serde_json::from_str::<HashMap<String, String>>(&raw) else {
             return;
         };
@@ -1174,13 +1248,15 @@ impl JsParityEngine {
         (by_len_edge, skeletons)
     }
 
-    fn load_decision_model(path: &Path) -> DecisionModel {
-        let mut model = DecisionModel::default();
-
+    fn load_decision_model(path: &Path, base: DecisionModel) -> DecisionModel {
         let Ok(raw) = fs::read_to_string(path) else {
-            return model;
+            return base;
         };
-        let Ok(parsed) = serde_json::from_str::<DecisionModelFile>(&raw) else {
+        Self::load_decision_model_from_str(&raw, base)
+    }
+
+    fn load_decision_model_from_str(raw: &str, mut model: DecisionModel) -> DecisionModel {
+        let Ok(parsed) = serde_json::from_str::<DecisionModelFile>(raw) else {
             return model;
         };
 
@@ -1334,6 +1410,64 @@ impl JsParityEngine {
             .iter()
             .any(|token| URGENCY_TOKENS.contains(&token.as_str()))
     }
+}
+
+fn resolve_profanity_root() -> Option<PathBuf> {
+    let mut candidates = Vec::<PathBuf>::new();
+
+    if let Ok(raw) = std::env::var("OMEGA_PROFANITY_ROOT") {
+        let trimmed = raw.trim();
+        if !trimmed.is_empty() {
+            candidates.push(PathBuf::from(trimmed));
+        }
+    }
+
+    if let Ok(cwd) = std::env::current_dir() {
+        candidates.push(cwd.join("profanity-destroyer"));
+        let mut cursor = cwd;
+        for _ in 0..4 {
+            let Some(parent) = cursor.parent() else {
+                break;
+            };
+            let parent_buf = parent.to_path_buf();
+            candidates.push(parent_buf.join("profanity-destroyer"));
+            cursor = parent_buf;
+        }
+    }
+
+    if let Ok(exe_path) = std::env::current_exe() {
+        if let Some(exe_dir) = exe_path.parent() {
+            let mut cursor = exe_dir.to_path_buf();
+            candidates.push(cursor.join("profanity-destroyer"));
+            for _ in 0..6 {
+                let Some(parent) = cursor.parent() else {
+                    break;
+                };
+                let parent_buf = parent.to_path_buf();
+                candidates.push(parent_buf.join("profanity-destroyer"));
+                cursor = parent_buf;
+            }
+        }
+    }
+
+    candidates.push(
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("..")
+            .join("profanity-destroyer"),
+    );
+
+    let mut seen = HashSet::<String>::new();
+    for candidate in candidates {
+        let key = candidate.to_string_lossy().to_string();
+        if !seen.insert(key) {
+            continue;
+        }
+        if candidate.join("en.json").exists() {
+            return Some(candidate);
+        }
+    }
+
+    None
 }
 
 fn bool_to_f32(v: bool) -> f32 {
@@ -1589,24 +1723,15 @@ fn is_math_expression_like(normalized: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use std::path::PathBuf;
-
     use crate::{dfa_fast_path::DfaEngine, simd_preprocessor::SimdBuffer};
 
     use super::JsParityEngine;
-
-    fn repo_root() -> PathBuf {
-        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .parent()
-            .expect("workspace root exists")
-            .to_path_buf()
-    }
 
     #[test]
     fn detects_masked_obfuscated_slur() {
         let patterns = ["nigga", "nigger"];
         let dfa = DfaEngine::new(&patterns);
-        let parity = JsParityEngine::new(&patterns, &repo_root());
+        let parity = JsParityEngine::new(&patterns);
 
         let text = "n###gga";
         let native_raw_hit = dfa.scan(text);
@@ -1630,7 +1755,7 @@ mod tests {
     fn allows_clean_text() {
         let patterns = ["nigga", "nigger"];
         let dfa = DfaEngine::new(&patterns);
-        let parity = JsParityEngine::new(&patterns, &repo_root());
+        let parity = JsParityEngine::new(&patterns);
 
         let text = "hello friendly world";
         let native_raw_hit = dfa.scan(text);

@@ -8,7 +8,6 @@ use dfa_fast_path::DfaEngine;
 use js_parity::JsParityEngine;
 use l2_semantic::SemanticEngine;
 use simd_preprocessor::SimdBuffer;
-use std::path::PathBuf;
 
 /// The primary engine structure holding our Fast-Path and pointers to the Smart-Path.
 pub struct ModerationEngine {
@@ -28,12 +27,7 @@ impl ModerationEngine {
         let semantic = SemanticEngine::new(model_path, tokenizer_path, qdrant_url, collection_name)
             .await
             .expect("Failed to initialize L2 Semantic Engine");
-
-        let repo_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .parent()
-            .map(|p| p.to_path_buf())
-            .unwrap_or_else(|| PathBuf::from("."));
-        let parity = JsParityEngine::new(patterns, &repo_root);
+        let parity = JsParityEngine::new(patterns);
 
         Self {
             dfa: DfaEngine::new(patterns),
