@@ -28,5 +28,5 @@ jobs:
     - name: Upload Binary Artifact
       uses: actions/upload-artifact@v4
       with:
-        name: moderation_engine-windows-x64
-        path: target/release/moderation_engine.exe
+        name: telegram_bot-windows-x64
+        path: target/release/telegram_bot.exe
