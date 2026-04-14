@@ -21,8 +21,8 @@ async fn main() {
     let bad_words = vec!["fuck", "scam", "crypto double", "send funds", "bitcoin giveaway"];
     let engine = Arc::new(ModerationEngine::new(
         &bad_words, 
-        "../vector_db_engine/models/model_quantized.onnx", 
-        "../vector_db_engine/models/tokenizer.json",
+        "vector_db_engine/models/model_quantized.onnx", 
+        "vector_db_engine/models/tokenizer.json",
         "http://localhost:6334",
         "scam_patterns"
     ).await);
