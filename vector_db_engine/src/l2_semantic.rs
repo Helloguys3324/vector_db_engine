@@ -30,7 +30,7 @@ impl SemanticEngine {
         let qdrant = QdrantClient::from_url(qdrant_url).build().expect("Failed to connect to Qdrant");
 
         // Assure collection exists
-        if !qdrant.has_collection(collection_name).await.unwrap_or(false) {
+        if !qdrant.collection_exists(collection_name).await.unwrap_or(false) {
             qdrant
                 .create_collection(&CreateCollection {
                     collection_name: collection_name.to_string(),
@@ -50,11 +50,14 @@ impl SemanticEngine {
             println!("✅ Created Qdrant collection '{}'", collection_name);
 
             // Imbue a mock vector to prevent empty vector panic
+            let mut payload_map = std::collections::HashMap::new();
+            payload_map.insert("category", "crypto_scam".into());
+
             let _ = qdrant.upsert_points(collection_name, None, vec![
                 PointStruct::new(
                     1,
                     vec![0.5f32; 384],
-                    [("category", "crypto_scam".into())].into()
+                    payload_map.into()
                 )
             ], None).await;
         }
