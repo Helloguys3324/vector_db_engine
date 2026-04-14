@@ -56,19 +56,17 @@ impl SemanticEngine {
         let tensor_inputs = Array2::from_shape_vec((1, seq_len), input_ids_i64).unwrap();
         let tensor_mask = Array2::from_shape_vec((1, seq_len), attention_mask_i64).unwrap();
         
-        // In ORT 2.0, macro inputs macro returns the struct, no unwrap.
-        // We pass the ndarray directly.
         let inputs = ort::inputs![
-            "input_ids" => tensor_inputs,
-            "attention_mask" => tensor_mask
-        ].unwrap_or_else(|_| Default::default());
+            "input_ids" => ort::value::Tensor::from_array(tensor_inputs).unwrap(),
+            "attention_mask" => ort::value::Tensor::from_array(tensor_mask).unwrap()
+        ].unwrap();
 
         if let Ok(outputs) = self.session.run(inputs) {
-            if let Ok(embedding_tensor) = outputs["last_hidden_state"].try_extract_tensor::<f32>() {
-                if let Some(emb_slice) = embedding_tensor.as_slice() {
-                    let scam_centroid = vec![0.5f32; emb_slice.len()];
-                    return Self::cosine_similarity(emb_slice, &scam_centroid) > self.threshold;
-                }
+            if let Ok(embedding_tuple) = outputs["last_hidden_state"].try_extract_tensor::<f32>() {
+                // embedding_tuple is (&Shape, &[f32])
+                let emb_slice = embedding_tuple.1;
+                let scam_centroid = vec![0.5f32; emb_slice.len()];
+                return Self::cosine_similarity(emb_slice, &scam_centroid) > self.threshold;
             }
         }
 
