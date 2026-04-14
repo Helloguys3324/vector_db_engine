@@ -17,8 +17,18 @@ async fn main() {
 
     println!("🚀 Launching native Rust Moderation Bot...");
 
-    // 2. Initialize the High-Frequency Trading vector_db_engine
-    let bad_words = vec!["fuck", "scam", "crypto double", "send funds", "bitcoin giveaway"];
+    // 2. Load the exactly replicated `en.json` and `naughty-words` dictionary into RAM
+    let dict_content = std::fs::read_to_string("rust_dict.txt")
+        .expect("Failed to read rust_dict.txt. Ensure the python script compiled it first.");
+        
+    let bad_words: Vec<&str> = dict_content
+        .lines()
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty())
+        .collect();
+
+    println!("📚 Loaded {} profane patterns into L1 memory.", bad_words.len());
+
     let engine = Arc::new(ModerationEngine::new(
         &bad_words, 
         "vector_db_engine/models/model_quantized.onnx", 
@@ -35,6 +45,25 @@ async fn main() {
         |bot: Bot, msg: Message, engine: Arc<ModerationEngine>| async move {
             // Only process text messages
             if let Some(text) = msg.text() {
+                
+                // --- DYNAMIC TRAINING COMMAND ---
+                if text.starts_with("/train ") {
+                    let pattern = text.strip_prefix("/train ").unwrap().trim();
+                    if pattern.is_empty() { return respond(()); }
+                    
+                    match engine.train_payload(pattern).await {
+                        Ok(_) => {
+                            let _ = bot.send_message(msg.chat.id, "✅ Neural Network updated with new pattern!")
+                                .reply_to_message_id(msg.id).await;
+                        },
+                        Err(err) => {
+                            let _ = bot.send_message(msg.chat.id, format!("❌ Training error: {}", err))
+                                .reply_to_message_id(msg.id).await;
+                        }
+                    }
+                    return respond(());
+                }
+
                 // HOT PATH: Execute lexical DFA + SIMD buffer + Neural ONNX routing + Qdrant gRPC
                 if engine.check_payload(text).await {
                     

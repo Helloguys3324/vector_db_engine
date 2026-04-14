@@ -12,4 +12,5 @@ ndarray = "0.17"
 tokenizers = "0.15"
 qdrant-client = "=1.8.0"
 tokio = { version = "1.35", features = ["full"] }
+uuid = { version = "1.23.0", features = ["v4"] }
 

@@ -24,3 +24,10 @@ qdrant_storage/
 profanity-destroyer/
 *.txt
 *.node
+
+# Python ML Environments (Heavy Data ~800MB)
+.venv/
+__pycache__/
+*.pyc
+*.csv
+*.xlsx

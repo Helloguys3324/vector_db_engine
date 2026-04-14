@@ -31,6 +31,11 @@ impl ModerationEngine {
         }
     }
 
+    /// Dynamically train the Neural Network from the chat interface
+    pub async fn train_payload(&self, text: &str) -> Result<(), String> {
+        self.semantic.train_payload(text).await
+    }
+
     /// Process a string through the hybrid L1 (DFA) + L2 (ONNX + Qdrant) path.
     /// Returns `true` if it violated L1 or matched a scam vector in L2.
     #[inline(always)]
