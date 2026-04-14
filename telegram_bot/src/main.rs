@@ -1,18 +1,17 @@
 use dotenvy::dotenv;
+use moderation_engine::ModerationEngine;
 use std::env;
 use std::sync::Arc;
 use teloxide::prelude::*;
-use moderation_engine::ModerationEngine;
 use tokio::time::{sleep, Duration};
 
 #[tokio::main]
 async fn main() {
     // 1. Load the core environment configs from D:\gemini\.env
     dotenv().ok();
-    
-    let bot_token = env::var("BOT_TOKEN")
-        .expect("BOT_TOKEN environment variable is required");
-        
+
+    let bot_token = env::var("BOT_TOKEN").expect("BOT_TOKEN environment variable is required");
+
     let bot = Bot::new(bot_token);
 
     println!("🚀 Launching native Rust Moderation Bot...");
@@ -20,23 +19,29 @@ async fn main() {
     // 2. Load the exactly replicated `en.json` and `naughty-words` dictionary into RAM
     let dict_content = std::fs::read_to_string("rust_dict.txt")
         .expect("Failed to read rust_dict.txt. Ensure the python script compiled it first.");
-        
+
     let bad_words: Vec<&str> = dict_content
         .lines()
         .map(|s| s.trim())
         .filter(|s| !s.is_empty())
         .collect();
 
-    println!("📚 Loaded {} profane patterns into L1 memory.", bad_words.len());
+    println!(
+        "📚 Loaded {} profane patterns into L1 memory.",
+        bad_words.len()
+    );
 
-    let engine = Arc::new(ModerationEngine::new(
-        &bad_words, 
-        "vector_db_engine/models/model_quantized.onnx", 
-        "vector_db_engine/models/tokenizer.json",
-        "http://localhost:6334",
-        "scam_patterns"
-    ).await);
-    
+    let engine = Arc::new(
+        ModerationEngine::new(
+            &bad_words,
+            "vector_db_engine/models/model_quantized.onnx",
+            "vector_db_engine/models/tokenizer.json",
+            "http://localhost:6334",
+            "scam_patterns",
+        )
+        .await,
+    );
+
     let engine_mode = env::var("DETECTOR_MODE").unwrap_or_else(|_| "balanced".to_string());
     println!("Bot active (mode={})", engine_mode);
 
@@ -45,20 +50,28 @@ async fn main() {
         |bot: Bot, msg: Message, engine: Arc<ModerationEngine>| async move {
             // Only process text messages
             if let Some(text) = msg.text() {
-                
                 // --- DYNAMIC TRAINING COMMAND ---
                 if text.starts_with("/train ") {
                     let pattern = text.strip_prefix("/train ").unwrap().trim();
-                    if pattern.is_empty() { return respond(()); }
-                    
+                    if pattern.is_empty() {
+                        return respond(());
+                    }
+
                     match engine.train_payload(pattern).await {
                         Ok(_) => {
-                            let _ = bot.send_message(msg.chat.id, "✅ Neural Network updated with new pattern!")
-                                .reply_to_message_id(msg.id).await;
-                        },
+                            let _ = bot
+                                .send_message(
+                                    msg.chat.id,
+                                    "✅ Neural Network updated with new pattern!",
+                                )
+                                .reply_to_message_id(msg.id)
+                                .await;
+                        }
                         Err(err) => {
-                            let _ = bot.send_message(msg.chat.id, format!("❌ Training error: {}", err))
-                                .reply_to_message_id(msg.id).await;
+                            let _ = bot
+                                .send_message(msg.chat.id, format!("❌ Training error: {}", err))
+                                .reply_to_message_id(msg.id)
+                                .await;
                         }
                     }
                     return respond(());
@@ -66,16 +79,16 @@ async fn main() {
 
                 // HOT PATH: Execute lexical DFA + SIMD buffer + Neural ONNX routing + Qdrant gRPC
                 if engine.check_payload(text).await {
-                    
                     // 1. Fire-and-forget: Delete profane message
                     if let Err(e) = bot.delete_message(msg.chat.id, msg.id).await {
                         eprintln!("Failed to delete message: {}", e);
                     }
-                    
+
                     // 2. Reply warning
-                    if let Ok(warn_msg) = bot.send_message(msg.chat.id, "🚫 No profanity allowed!")
+                    if let Ok(warn_msg) = bot
+                        .send_message(msg.chat.id, "🚫 No profanity allowed!")
                         .reply_to_message_id(msg.id)
-                        .await 
+                        .await
                     {
                         // 3. Spawn background detached coroutine to delete warning 5s later
                         tokio::spawn(async move {
@@ -86,7 +99,7 @@ async fn main() {
                 }
             }
             respond(())
-        }
+        },
     );
 
     Dispatcher::builder(bot, handler)

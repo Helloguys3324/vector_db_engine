@@ -1,5 +1,5 @@
-use std::sync::atomic::{AtomicUsize, Ordering};
 use crossbeam_utils::CachePadded;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 const MAX_PAYLOAD_SIZE: usize = 1024;
 
@@ -10,7 +10,7 @@ pub struct HandoffQueue {
     buffer: Vec<QueueItem>,
     capacity: usize,
     mask: usize,
-    
+
     // Sequence barriers
     head: CachePadded<AtomicUsize>,
     tail: CachePadded<AtomicUsize>,
@@ -26,8 +26,14 @@ impl HandoffQueue {
     pub fn new(capacity: usize) -> Self {
         // Enforce power of 2 for fast modulo tracking
         assert!(capacity.is_power_of_two());
-        
-        let buffer = vec![QueueItem { data: [0; MAX_PAYLOAD_SIZE], len: 0 }; capacity];
+
+        let buffer = vec![
+            QueueItem {
+                data: [0; MAX_PAYLOAD_SIZE],
+                len: 0
+            };
+            capacity
+        ];
 
         Self {
             buffer,
@@ -50,11 +56,11 @@ impl HandoffQueue {
         }
 
         let idx = current_tail & self.mask;
-        
+
         // Zero-copy byte map
         let bytes = msg.as_bytes();
         let len = bytes.len().min(MAX_PAYLOAD_SIZE);
-        
+
         // Convert safe pointer to mutable pointer for ring buffer internal access
         // (In a real bare-metal framework, we use UnsafeCell wrapped items)
         unsafe {
@@ -64,15 +70,16 @@ impl HandoffQueue {
         }
 
         // Commit sequence
-        self.tail.store(current_tail.wrapping_add(1), Ordering::Release);
+        self.tail
+            .store(current_tail.wrapping_add(1), Ordering::Release);
         true
     }
 
     /// L2 Consumes messages from here.
     #[inline]
-    pub fn dequeue<F>(&self, mut callback: F) -> bool 
-    where 
-        F: FnMut(&[u8]) 
+    pub fn dequeue<F>(&self, mut callback: F) -> bool
+    where
+        F: FnMut(&[u8]),
     {
         let current_head = self.head.load(Ordering::Relaxed);
         let current_tail = self.tail.load(Ordering::Acquire);
@@ -83,7 +90,7 @@ impl HandoffQueue {
         }
 
         let idx = current_head & self.mask;
-        
+
         unsafe {
             let item_ptr = self.buffer.as_ptr().add(idx) as *const QueueItem;
             let slice = std::slice::from_raw_parts((*item_ptr).data.as_ptr(), (*item_ptr).len);
@@ -91,7 +98,8 @@ impl HandoffQueue {
         }
 
         // Commit consume
-        self.head.store(current_head.wrapping_add(1), Ordering::Release);
+        self.head
+            .store(current_head.wrapping_add(1), Ordering::Release);
         true
     }
 }
