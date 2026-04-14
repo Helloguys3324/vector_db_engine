@@ -17,3 +17,10 @@ Cargo.lock
 models/
 *.onnx
 *.json
+.env
+*.exe
+qdrant_storage/
+.idea/
+profanity-destroyer/
+*.txt
+*.node

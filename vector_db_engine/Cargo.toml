@@ -1,0 +1,15 @@
+[package]
+name = "moderation_engine"
+version = "0.2.0"
+edition = "2021"
+
+[dependencies]
+crossbeam-queue = "0.3.11"
+crossbeam-utils = "0.8.19"
+aho-corasick = "1.1"
+ort = { version = "2.0.0-rc.8", features = ["ndarray", "download-binaries", "tls-rustls"] }
+ndarray = "0.17"
+tokenizers = "0.15"
+qdrant-client = "1.7.0"
+tokio = { version = "1.35", features = ["full"] }
+
