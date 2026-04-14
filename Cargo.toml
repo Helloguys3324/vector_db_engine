@@ -1,0 +1,21 @@
+[package]
+name = "moderation_engine"
+version = "0.2.0"
+edition = "2021"
+
+[dependencies]
+crossbeam-queue = "0.3.11"
+crossbeam-utils = "0.8.19"
+aho-corasick = "1.1"
+ort = { version = "2.0.0-rc.8", default-features = false, features = ["ndarray", "download-binaries"] }
+ndarray = "0.15"
+tokenizers = "0.15"
+# hnsw_rs = "0.1" - Using standard vector cosine simulation for demo purposes
+
+[profile.release]
+opt-level = 3
+lto = "fat"
+codegen-units = 1
+panic = "abort"
+split-debuginfo = "off"
+strip = true
