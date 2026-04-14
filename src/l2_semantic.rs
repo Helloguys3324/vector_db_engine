@@ -59,7 +59,7 @@ impl SemanticEngine {
         let inputs = ort::inputs![
             "input_ids" => ort::value::Tensor::from_array(tensor_inputs).unwrap(),
             "attention_mask" => ort::value::Tensor::from_array(tensor_mask).unwrap()
-        ].unwrap();
+        ];
 
         if let Ok(outputs) = self.session.run(inputs) {
             if let Ok(embedding_tuple) = outputs["last_hidden_state"].try_extract_tensor::<f32>() {
