@@ -1749,6 +1749,30 @@ mod tests {
     }
 
     #[test]
+    fn detects_short_acronym_ng() {
+        let patterns = ["nigga", "nigger"];
+        let dfa = DfaEngine::new(&patterns);
+        let parity = JsParityEngine::new(&patterns);
+
+        let text = "ng";
+        let native_raw_hit = dfa.scan(text);
+
+        let mut buffer = SimdBuffer::new();
+        buffer.normalize_adversarial_text(text);
+
+        let analysis = parity.analyze(
+            text,
+            native_raw_hit,
+            buffer.strict_candidates(),
+            buffer.collapsed_candidates(),
+            buffer.merged_candidates(),
+        );
+
+        assert!(analysis.matched);
+        assert!(analysis.is_profane);
+    }
+
+    #[test]
     fn allows_clean_text() {
         let patterns = ["nigga", "nigger"];
         let dfa = DfaEngine::new(&patterns);
