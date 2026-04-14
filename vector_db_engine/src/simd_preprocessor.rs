@@ -1,74 +1,338 @@
-use core::arch::x86_64::*;
-use std::str;
+use std::collections::HashMap;
+use unicode_normalization::UnicodeNormalization;
 
-const SIMD_CHUNK_SIZE: usize = 32;
-const MAX_BUFFER_SIZE: usize = 1024; // Pre-allocated stack limit for typical chat messages
+const MAX_CANDIDATES: usize = 128;
+const MAX_TOKEN_LEN: usize = 24;
 
-/// Thread-local pre-allocated buffer to handle SIMD operations without allocation.
+#[derive(Clone, Debug)]
+pub struct Candidate {
+    pub text: String,
+    pub obfuscated: bool,
+}
+
+#[derive(Clone, Debug, Default)]
+struct Chunk {
+    text: String,
+    obfuscated: bool,
+}
+
+/// Kept as `SimdBuffer` to avoid touching external call sites, but the payload prep
+/// now mirrors the old JS detector logic (NFKC, leet folding, obfuscation candidates).
+#[derive(Default)]
 pub struct SimdBuffer {
-    buffer: [u8; MAX_BUFFER_SIZE],
-    len: usize,
+    normalized_with_spaces: String,
+    strict_candidates: Vec<Candidate>,
+    collapsed_candidates: Vec<Candidate>,
+    merged_candidates: Vec<Candidate>,
 }
 
 impl SimdBuffer {
     #[inline]
     pub fn new() -> Self {
-        Self {
-            buffer: [0; MAX_BUFFER_SIZE],
-            len: 0,
-        }
+        Self::default()
     }
 
-    /// Normalizes adversarial text (removes ZWNJ, Homoglyphs) via AVX2.
-    /// Bypasses UTF-8 bound checking overhead by treating everything as bytes, targeting specific unicode footprints.
-    /// This is an optimized layout using `core::arch::x86_64`.
     pub fn normalize_adversarial_text(&mut self, text: &str) {
-        let text_bytes = text.as_bytes();
-        let mut i = 0;
-        let mut write_idx = 0;
-        
-        let text_len = text_bytes.len().min(MAX_BUFFER_SIZE);
-
-        unsafe {
-            // Setup target characters for stripping: e.g. invisible / zero width markers
-            // For example purposes: replacing a specific homoglyph byte or stripping simple control characters.
-            let whitespace_vec = _mm256_set1_epi8(0x20); // space constraint
-
-            while i + SIMD_CHUNK_SIZE <= text_len {
-                // Load 32 bytes into YMM register
-                let chunk = _mm256_loadu_si256(text_bytes.as_ptr().add(i) as *const __m256i);
-                
-                // Homoglyph normalization & case folding pseudo-logic:
-                // Fast bitwise operations can fold uppercase ASCII to lowercase.
-                // a -> A requires setting 5th bit (OR 0x20). 
-                // This is a naive ascii-fold for illustration.
-                let lowercased = _mm256_or_si256(chunk, whitespace_vec);
-
-                // Store modified bytes back into our stack buffer.
-                // Note: True ZWNJ stripping requires byte compaction which uses VBMI/AVX-512 VCOMPRESS or PSHUFB masks.
-                _mm256_storeu_si256(self.buffer.as_mut_ptr().add(write_idx) as *mut __m256i, lowercased);
-                
-                i += SIMD_CHUNK_SIZE;
-                write_idx += SIMD_CHUNK_SIZE;
-            }
-
-            // Handle remainder scalar
-            while i < text_len {
-                let b = text_bytes[i];
-                // basic scalar fold logic
-                self.buffer[write_idx] = b | 0x20;
-                i += 1;
-                write_idx += 1;
-            }
-        }
-        
-        self.len = write_idx;
+        self.normalized_with_spaces = normalize_with_spaces(text, false);
+        self.strict_candidates = extract_candidates(text, false);
+        self.collapsed_candidates = extract_candidates(text, true);
+        self.merged_candidates =
+            merge_candidate_sets(&self.strict_candidates, &self.collapsed_candidates);
     }
 
     #[inline]
     pub fn as_str(&self) -> &str {
-        // Unsafe because we deliberately operate byte-wise. 
-        // Real-world, you'd ensure valid UTF-8 boundaries or pass as raw bytes to the DFA.
-        unsafe { str::from_utf8_unchecked(&self.buffer[..self.len]) }
+        &self.normalized_with_spaces
+    }
+
+    #[inline]
+    pub fn strict_candidates(&self) -> &[Candidate] {
+        &self.strict_candidates
+    }
+
+    #[inline]
+    pub fn collapsed_candidates(&self) -> &[Candidate] {
+        &self.collapsed_candidates
+    }
+
+    #[inline]
+    pub fn merged_candidates(&self) -> &[Candidate] {
+        &self.merged_candidates
+    }
+}
+
+#[inline]
+fn map_digit_to_leet(ch: char) -> char {
+    match ch {
+        '4' => 'a',
+        '3' => 'e',
+        '1' => 'i',
+        '0' => 'o',
+        '5' => 's',
+        '7' => 't',
+        '8' => 'b',
+        '2' => 'z',
+        '6' => 'g',
+        '9' => 'g',
+        _ => ch,
+    }
+}
+
+#[inline]
+fn map_symbol_to_leet(ch: char) -> Option<char> {
+    match ch {
+        '@' => Some('a'),
+        '$' => Some('s'),
+        '!' | '|' => Some('i'),
+        '+' => Some('t'),
+        _ => None,
+    }
+}
+
+#[inline]
+fn map_char(ch: char, map_digits_to_leet: bool) -> char {
+    if ch.is_ascii_lowercase() {
+        return ch;
+    }
+
+    if matches!(ch, ' ' | '\t' | '\n' | '\r') {
+        return ' ';
+    }
+
+    if ch.is_ascii_digit() {
+        return if map_digits_to_leet {
+            map_digit_to_leet(ch)
+        } else {
+            ch
+        };
+    }
+
+    if let Some(mapped) = map_symbol_to_leet(ch) {
+        return mapped;
+    }
+
+    ' '
+}
+
+fn has_repeated_run(text: &str) -> bool {
+    if text.len() < 2 {
+        return false;
+    }
+
+    let lowered: Vec<char> = text.to_lowercase().chars().collect();
+    let mut run = 1usize;
+    let mut max_run = 1usize;
+
+    for i in 1..lowered.len() {
+        if lowered[i] == lowered[i - 1] {
+            run += 1;
+            max_run = max_run.max(run);
+            if run >= 2 && matches!(lowered[i], 'z' | 'x' | 'q' | 'v' | 'j' | 'k') {
+                return true;
+            }
+        } else {
+            run = 1;
+        }
+    }
+
+    max_run >= 3
+}
+
+#[inline]
+fn vowel_count(text: &str) -> usize {
+    text.chars()
+        .filter(|c| matches!(c, 'a' | 'e' | 'i' | 'o' | 'u'))
+        .count()
+}
+
+fn is_consonant_heavy(text: &str) -> bool {
+    if text.len() < 3 {
+        return false;
+    }
+
+    let vowels = vowel_count(text);
+    if text.len() <= 4 {
+        return vowels == 0;
+    }
+
+    (vowels as f32 / text.len() as f32) <= 0.22
+}
+
+fn normalize_with_spaces(text: &str, collapse_repeats: bool) -> String {
+    if text.is_empty() {
+        return String::new();
+    }
+
+    let source: String = text.nfkc().collect::<String>().to_lowercase();
+    let has_letters = source.chars().any(|c| c.is_ascii_lowercase());
+    let has_strong_leet_markers = source
+        .chars()
+        .any(|c| matches!(c, '@' | '$' | '!' | '|' | '+'));
+    let map_digits_to_leet = has_letters || has_strong_leet_markers;
+
+    let mut out = String::with_capacity(source.len());
+    let mut prev_non_space: Option<char> = None;
+    let mut prev_was_space = true;
+
+    for raw_char in source.chars() {
+        let mapped = map_char(raw_char, map_digits_to_leet);
+        if mapped == ' ' {
+            if !prev_was_space {
+                out.push(' ');
+                prev_was_space = true;
+            }
+            continue;
+        }
+
+        if collapse_repeats && prev_non_space.is_some_and(|prev| prev == mapped) {
+            continue;
+        }
+
+        out.push(mapped);
+        prev_non_space = Some(mapped);
+        prev_was_space = false;
+    }
+
+    out.trim().to_string()
+}
+
+fn compact_word(normalized: &str) -> String {
+    normalized
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric())
+        .collect()
+}
+
+pub fn normalize_token(text: &str, collapse_repeats: bool) -> String {
+    compact_word(&normalize_with_spaces(text, collapse_repeats))
+}
+
+fn extract_candidates(text: &str, collapse_repeats: bool) -> Vec<Candidate> {
+    let mut candidates = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    let mut chunks = Vec::<Chunk>::new();
+
+    for raw_chunk in text.split_whitespace() {
+        if raw_chunk.is_empty() {
+            continue;
+        }
+
+        let normalized = normalize_with_spaces(raw_chunk, collapse_repeats);
+        if normalized.is_empty() {
+            continue;
+        }
+
+        let compacted = compact_word(&normalized);
+        if compacted.is_empty() || compacted.len() > MAX_TOKEN_LEN {
+            continue;
+        }
+
+        let has_non_alpha = raw_chunk.chars().any(|c| !c.is_ascii_alphabetic());
+        let obfuscated =
+            has_non_alpha || has_repeated_run(raw_chunk) || is_consonant_heavy(&compacted);
+
+        if compacted.len() >= 2 && seen.insert(compacted.clone()) {
+            candidates.push(Candidate {
+                text: compacted.clone(),
+                obfuscated,
+            });
+            if candidates.len() >= MAX_CANDIDATES {
+                return candidates;
+            }
+        }
+
+        chunks.push(Chunk {
+            text: compacted,
+            obfuscated,
+        });
+    }
+
+    for start in 0..chunks.len() {
+        if chunks[start].text.len() > 3 {
+            continue;
+        }
+
+        let mut combined = chunks[start].text.clone();
+        let mut has_obfuscated_chunk = chunks[start].obfuscated;
+        let mut single_char_count = usize::from(chunks[start].text.len() == 1);
+
+        for end in (start + 1)..usize::min(start + 5, chunks.len()) {
+            if chunks[end].text.len() > 3 {
+                break;
+            }
+
+            combined.push_str(&chunks[end].text);
+            has_obfuscated_chunk |= chunks[end].obfuscated;
+            if chunks[end].text.len() == 1 {
+                single_char_count += 1;
+            }
+
+            if combined.len() > MAX_TOKEN_LEN {
+                break;
+            }
+
+            if combined.len() >= 3
+                && (has_obfuscated_chunk || single_char_count >= 2)
+                && seen.insert(combined.clone())
+            {
+                candidates.push(Candidate {
+                    text: combined.clone(),
+                    obfuscated: true,
+                });
+                if candidates.len() >= MAX_CANDIDATES {
+                    return candidates;
+                }
+            }
+        }
+    }
+
+    candidates
+}
+
+fn merge_candidate_sets(strict: &[Candidate], collapsed: &[Candidate]) -> Vec<Candidate> {
+    let mut merged = Vec::<Candidate>::new();
+    let mut positions = HashMap::<String, usize>::new();
+
+    for candidate in strict.iter().chain(collapsed.iter()) {
+        if let Some(existing_idx) = positions.get(&candidate.text).copied() {
+            if candidate.obfuscated {
+                merged[existing_idx].obfuscated = true;
+            }
+            continue;
+        }
+
+        if merged.len() >= MAX_CANDIDATES {
+            break;
+        }
+
+        positions.insert(candidate.text.clone(), merged.len());
+        merged.push(candidate.clone());
+    }
+
+    merged
+}
+
+#[cfg(test)]
+mod tests {
+    use super::SimdBuffer;
+
+    #[test]
+    fn extracts_ngga_candidate_from_masked_slur() {
+        let mut buffer = SimdBuffer::new();
+        buffer.normalize_adversarial_text("n###gga");
+        assert!(buffer
+            .strict_candidates()
+            .iter()
+            .any(|c| c.text == "ngga" && c.obfuscated));
+    }
+
+    #[test]
+    fn merges_spaced_letters_into_word_candidate() {
+        let mut buffer = SimdBuffer::new();
+        buffer.normalize_adversarial_text("n i g g a");
+        assert!(buffer
+            .merged_candidates()
+            .iter()
+            .any(|c| c.text == "nigga" && c.obfuscated));
     }
 }

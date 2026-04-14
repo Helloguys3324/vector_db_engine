@@ -3,11 +3,13 @@ name: Build Moderation Engine
 on:
   push:
     branches: [ "main", "master" ]
+  pull_request:
+    branches: [ "main", "master" ]
   workflow_dispatch: # Allows manual trigger from the UI
 
 jobs:
   build:
-    name: Build on Windows MSVC
+    name: Build and test on Windows MSVC
     runs-on: windows-2022 # Crucial: GitHub provides Windows instances with full Visual Studio C++ Linkers pre-installed!
 
     steps:
@@ -22,11 +24,18 @@ jobs:
     - name: Cache Cargo Dependencies
       uses: Swatinem/rust-cache@v2
 
-    - name: Build Release Engine (L1 / L2)
-      run: cargo build --release
+    - name: Check Rust formatting
+      run: cargo fmt --all -- --check
+
+    - name: Run moderation engine tests
+      run: cargo test -p moderation_engine --lib --quiet
+
+    - name: Build release telegram bot
+      run: cargo build -p telegram_bot --release --locked
       
     - name: Upload Binary Artifact
       uses: actions/upload-artifact@v4
       with:
         name: telegram_bot-windows-x64
         path: target/release/telegram_bot.exe
+        if-no-files-found: error
