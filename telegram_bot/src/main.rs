@@ -6,14 +6,18 @@ use teloxide::prelude::*;
 use tokio::time::{sleep, Duration};
 use unicode_normalization::UnicodeNormalization;
 fn sanitize_text(raw_input: &str) -> String {
-    raw_input.chars()
+    raw_input
+        .chars()
         // 1. Вырезаем все невидимые символы (Zero-Width, RTL overrides и т.д.)
-        .filter(|c| !matches!(*c, 
-            '\u{200B}'..='\u{200F}' | // Zero-width spaces & marks
-            '\u{202A}'..='\u{202E}' | // Text direction overrides
-            '\u{2060}'..='\u{2064}' | // Invisible math operators
-            '\u{FEFF}'                // Byte order mark
-        ))
+        .filter(|c| {
+            !matches!(
+                *c,
+                '\u{200B}'..='\u{200F}' | // Zero-width spaces & marks
+                '\u{202A}'..='\u{202E}' | // Text direction overrides
+                '\u{2060}'..='\u{2064}' | // Invisible math operators
+                '\u{FEFF}'                // Byte order mark
+            )
+        })
         // 2. Принудительно в нижний регистр (flat_map нужен, т.к. 1 символ может дать 2 в low-case)
         .flat_map(|c| c.to_lowercase())
         // 3. Анти-Тайпсквоттинг: переводим визуально похожую кириллицу в латиницу (Homoglyphs)
