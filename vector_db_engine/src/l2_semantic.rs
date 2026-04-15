@@ -18,6 +18,7 @@ const BOOTSTRAP_PLACEHOLDER_CATEGORY: &str = "bootstrap_placeholder";
 /// L2 Semantic Smart-Path via gRPC Qdrant
 pub struct SemanticEngine {
     session: Mutex<Session>,
+    expects_token_type_ids: bool,
     tokenizer: Tokenizer,
     qdrant: QdrantClient,
     collection_name: String,
@@ -36,6 +37,10 @@ impl SemanticEngine {
             .with_optimization_level(GraphOptimizationLevel::Level3)?
             .with_intra_threads(4)?
             .commit_from_file(model_path)?;
+        let expects_token_type_ids = session
+            .inputs
+            .iter()
+            .any(|input| input.name.eq_ignore_ascii_case("token_type_ids"));
 
         let tokenizer =
             Tokenizer::from_file(tokenizer_path).expect("Failed to load tokenizer.json");
@@ -89,6 +94,7 @@ impl SemanticEngine {
 
         Ok(Self {
             session: Mutex::new(session),
+            expects_token_type_ids,
             tokenizer,
             qdrant,
             collection_name: collection_name.to_string(),
@@ -240,10 +246,22 @@ impl SemanticEngine {
         let tensor_mask = Array2::from_shape_vec((1, seq_len), attention_mask_i64)
             .map_err(|err| err.to_string())?;
 
-        let inputs = ort::inputs![
-            "input_ids" => ort::value::Tensor::from_array(tensor_inputs).map_err(|err| err.to_string())?,
-            "attention_mask" => ort::value::Tensor::from_array(tensor_mask).map_err(|err| err.to_string())?
-        ];
+        let inputs = if self.expects_token_type_ids {
+            let token_type_ids_i64 = vec![0i64; seq_len];
+            let tensor_token_type = Array2::from_shape_vec((1, seq_len), token_type_ids_i64)
+                .map_err(|err| err.to_string())?;
+
+            ort::inputs![
+                "input_ids" => ort::value::Tensor::from_array(tensor_inputs).map_err(|err| err.to_string())?,
+                "attention_mask" => ort::value::Tensor::from_array(tensor_mask).map_err(|err| err.to_string())?,
+                "token_type_ids" => ort::value::Tensor::from_array(tensor_token_type).map_err(|err| err.to_string())?
+            ]
+        } else {
+            ort::inputs![
+                "input_ids" => ort::value::Tensor::from_array(tensor_inputs).map_err(|err| err.to_string())?,
+                "attention_mask" => ort::value::Tensor::from_array(tensor_mask).map_err(|err| err.to_string())?
+            ]
+        };
 
         let mut session_guard = self
             .session
