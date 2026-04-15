@@ -38,7 +38,7 @@ impl SemanticEngine {
             .with_intra_threads(4)?
             .commit_from_file(model_path)?;
         let expects_token_type_ids = session
-            .inputs
+            .inputs()
             .iter()
             .any(|input| input.name.eq_ignore_ascii_case("token_type_ids"));
 
