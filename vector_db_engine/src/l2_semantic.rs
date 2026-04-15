@@ -40,7 +40,7 @@ impl SemanticEngine {
         let expects_token_type_ids = session
             .inputs()
             .iter()
-            .any(|input| input.name.eq_ignore_ascii_case("token_type_ids"));
+            .any(|input| input.name().eq_ignore_ascii_case("token_type_ids"));
 
         let tokenizer =
             Tokenizer::from_file(tokenizer_path).expect("Failed to load tokenizer.json");
