@@ -5,6 +5,7 @@ use std::sync::Arc;
 use teloxide::prelude::*;
 use tokio::time::{sleep, Duration};
 use unicode_normalization::UnicodeNormalization;
+use unicode_categories::UnicodeCategories;
 fn sanitize_text(raw_input: &str) -> String {
     raw_input
         .chars()
