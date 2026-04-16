@@ -46,8 +46,7 @@ const URGENCY_TOKENS: [&str; 11] = [
     "security",
 ];
 
-const EMBEDDED_MODERATION_DB_JSON: &str =
-    include_str!("../../profanity-destroyer/src/database/moderation-db.json");
+const EMBEDDED_MODERATION_DB_JSON: &str = include_str!("embedded_js/moderation-db.json");
 const EMBEDDED_DECISION_MODEL_JSON: &str = include_str!("embedded_js/decision-model.json");
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
