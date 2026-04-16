@@ -7,7 +7,7 @@ use tokio::time::{sleep, Duration};
 
 #[tokio::main]
 async fn main() {
-    // 1. Load the core environment configs from D:\gemini\.env
+    // 1. Load core environment configs from .env in the current working directory
     dotenv().ok();
 
     let bot_token = env::var("BOT_TOKEN").expect("BOT_TOKEN environment variable is required");
@@ -16,7 +16,7 @@ async fn main() {
 
     println!("🚀 Launching native Rust Moderation Bot...");
 
-    // 2. Load the exactly replicated `en.json` and `naughty-words` dictionary into RAM
+    // 2. Load the compiled lexical dictionary (moderation-db + naughty-words) into RAM
     let dict_content = std::fs::read_to_string("rust_dict.txt")
         .expect("Failed to read rust_dict.txt. Ensure the python script compiled it first.");
 

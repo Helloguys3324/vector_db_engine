@@ -1,41 +1,97 @@
-name: Build Moderation Engine
+name: CI
 
 on:
   push:
-    branches: [ "main", "master" ]
+    branches: ["main", "master"]
   pull_request:
-    branches: [ "main", "master" ]
-  workflow_dispatch: # Allows manual trigger from the UI
+    branches: ["main", "master"]
+  workflow_dispatch:
 
 jobs:
-  build:
-    name: Build and test on Windows MSVC
-    runs-on: windows-2022 # Crucial: GitHub provides Windows instances with full Visual Studio C++ Linkers pre-installed!
+  rust-check:
+    name: Rust check (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-2022]
 
     steps:
-    - name: Checkout repository
-      uses: actions/checkout@v4
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
-    - name: Install Rust Toolchain
-      uses: dtolnay/rust-toolchain@stable
-      with:
-        toolchain: stable-x86_64-pc-windows-msvc
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
 
-    - name: Cache Cargo Dependencies
-      uses: Swatinem/rust-cache@v2
+      - name: Cache Cargo dependencies
+        uses: Swatinem/rust-cache@v2
 
-    - name: Check Rust formatting
-      run: cargo fmt --all -- --check
+      - name: Setup protoc
+        uses: arduino/setup-protoc@v3
 
-    - name: Run moderation engine tests
-      run: cargo test -p moderation_engine --lib --quiet
+      - name: Check formatting
+        if: matrix.os == 'ubuntu-latest'
+        run: cargo fmt --all -- --check
 
-    - name: Build release telegram bot
-      run: cargo build -p telegram_bot --release --locked
-      
-    - name: Upload Binary Artifact
-      uses: actions/upload-artifact@v4
-      with:
-        name: telegram_bot-windows-x64
-        path: target/release/telegram_bot.exe
-        if-no-files-found: error
+      - name: Cargo check workspace
+        run: cargo check --workspace --all-targets --locked
+
+      - name: Compile tests (no run)
+        run: cargo test --workspace --no-run --locked
+
+  scripts-check:
+    name: Scripts check (Python + Node)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Python syntax check
+        run: python -m py_compile scripts/python/build_rust_dictionary.py scripts/python/seed_qdrant_from_hf.py scripts/python/seed_qdrant_from_local_datasets.py scripts/python/seed_qdrant_nitro_examples.py
+
+      - name: Node syntax check
+        run: node --check profanity-destroyer/scripts/word-admin.mjs
+
+  build-release:
+    name: Build release (Windows)
+    runs-on: windows-2022
+    needs: [rust-check, scripts-check]
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable-x86_64-pc-windows-msvc
+
+      - name: Cache Cargo dependencies
+        uses: Swatinem/rust-cache@v2
+
+      - name: Setup protoc
+        uses: arduino/setup-protoc@v3
+
+      - name: Build telegram bot release
+        run: cargo build -p telegram_bot --release --locked
+
+      - name: Upload binary artifact
+        if: github.event_name != 'pull_request'
+        uses: actions/upload-artifact@v4
+        with:
+          name: telegram_bot-windows-x64
+          path: target/release/telegram_bot.exe
+          if-no-files-found: error

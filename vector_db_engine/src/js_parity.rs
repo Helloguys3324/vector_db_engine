@@ -46,9 +46,8 @@ const URGENCY_TOKENS: [&str; 11] = [
     "security",
 ];
 
-const EMBEDDED_EN_JSON: &str = include_str!("embedded_js/en.json");
-const EMBEDDED_LEGACY_EXTERNAL_JSON: &str = include_str!("embedded_js/merged-external.json");
-const EMBEDDED_ABR_JSON: &str = include_str!("embedded_js/abr.json");
+const EMBEDDED_MODERATION_DB_JSON: &str =
+    include_str!("../../profanity-destroyer/src/database/moderation-db.json");
 const EMBEDDED_DECISION_MODEL_JSON: &str = include_str!("embedded_js/decision-model.json");
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -308,6 +307,16 @@ struct RawDbEntry {
     severity: Option<i32>,
 }
 
+#[derive(Debug, Deserialize, Default)]
+struct RawModerationDb {
+    #[serde(default)]
+    entries: Vec<RawDbEntry>,
+    #[serde(default)]
+    whitelist: Vec<String>,
+    #[serde(default, rename = "slangMap")]
+    slang_map: HashMap<String, String>,
+}
+
 #[derive(Debug, Deserialize)]
 struct RawLegacyEntry {
     #[serde(default)]
@@ -391,84 +400,38 @@ impl JsParityEngine {
     pub fn new(patterns: &[&str]) -> Self {
         let min_match_length = DEFAULT_MIN_MATCH_LENGTH;
         let profanity_root = resolve_profanity_root();
-        let en_path = profanity_root.as_ref().map(|root| root.join("en.json"));
-        let custom_blacklist_path = profanity_root.as_ref().map(|root| {
-            root.join("src")
-                .join("database")
-                .join("custom-blacklist.json")
-        });
-        let legacy_external_path = profanity_root.as_ref().map(|root| {
-            root.join("src")
-                .join("database")
-                .join("external")
-                .join("merged-external.json")
-        });
-        let slang_abbr_path = profanity_root.as_ref().map(|root| {
-            root.join("src")
-                .join("database")
-                .join("external")
-                .join("abr.json")
-        });
+        let moderation_db_path = profanity_root
+            .as_ref()
+            .map(|root| root.join("src").join("database").join("moderation-db.json"));
         let clean_lexicon_path = profanity_root
             .as_ref()
             .map(|root| root.join("Largest.list.of.english.words.txt"));
-        let whitelist_path = profanity_root
-            .as_ref()
-            .map(|root| root.join("src").join("database").join("whitelist.txt"));
         let decision_model_path = profanity_root
             .as_ref()
             .map(|root| root.join("src").join("config").join("decision-model.json"));
 
         let mut bad_word_set = HashSet::<String>::new();
+        let mut whitelist_set = HashSet::<String>::new();
         let mut short_acronym_set = HashSet::<String>::new();
         let mut aggressive_short_acronym_set = HashSet::<String>::new();
 
-        Self::ingest_en_database_from_str(
-            EMBEDDED_EN_JSON,
+        Self::ingest_moderation_database_from_str(
+            EMBEDDED_MODERATION_DB_JSON,
             min_match_length,
             &mut bad_word_set,
+            &mut whitelist_set,
             &mut short_acronym_set,
             &mut aggressive_short_acronym_set,
         );
-        if let Some(path) = en_path.as_deref() {
-            Self::ingest_en_database(
+        if let Some(path) = moderation_db_path.as_deref() {
+            Self::ingest_moderation_database(
                 path,
                 min_match_length,
                 &mut bad_word_set,
+                &mut whitelist_set,
                 &mut short_acronym_set,
                 &mut aggressive_short_acronym_set,
             );
-        }
-        if let Some(path) = custom_blacklist_path.as_deref() {
-            Self::ingest_en_database(
-                path,
-                min_match_length,
-                &mut bad_word_set,
-                &mut short_acronym_set,
-                &mut aggressive_short_acronym_set,
-            );
-        }
-
-        let exclude_legacy_external =
-            std::env::var("OMEGA_EXCLUDE_LEGACY_EXTERNAL").unwrap_or_default() == "1";
-        if !exclude_legacy_external {
-            Self::ingest_legacy_external_from_str(
-                EMBEDDED_LEGACY_EXTERNAL_JSON,
-                min_match_length,
-                &mut bad_word_set,
-            );
-            if let Some(path) = legacy_external_path.as_deref() {
-                Self::ingest_legacy_external(path, min_match_length, &mut bad_word_set);
-            }
-        }
-
-        Self::ingest_slang_abbreviations_from_str(
-            EMBEDDED_ABR_JSON,
-            min_match_length,
-            &mut bad_word_set,
-        );
-        if let Some(path) = slang_abbr_path.as_deref() {
-            Self::ingest_slang_abbreviations(path, min_match_length, &mut bad_word_set);
         }
 
         // If JS sources are unavailable, fall back to precompiled Rust patterns.
@@ -481,10 +444,6 @@ impl JsParityEngine {
             }
         }
 
-        let whitelist_set = whitelist_path
-            .as_deref()
-            .map(Self::load_whitelist)
-            .unwrap_or_default();
         let (top_words, clean_bloom) = clean_lexicon_path
             .as_deref()
             .map(|path| Self::load_clean_lexicon_assets(path, DEFAULT_CLEAN_LEXICON_LIMIT))
@@ -1137,37 +1096,41 @@ impl JsParityEngine {
             .is_some_and(|bloom| bloom.has(token))
     }
 
-    fn ingest_en_database(
+    fn ingest_moderation_database(
         path: &Path,
         min_match_length: usize,
         bad_word_set: &mut HashSet<String>,
+        whitelist_set: &mut HashSet<String>,
         short_acronym_set: &mut HashSet<String>,
         aggressive_short_acronym_set: &mut HashSet<String>,
     ) {
         let Ok(raw) = fs::read_to_string(path) else {
             return;
         };
-        Self::ingest_en_database_from_str(
+        Self::ingest_moderation_database_from_str(
             &raw,
             min_match_length,
             bad_word_set,
+            whitelist_set,
             short_acronym_set,
             aggressive_short_acronym_set,
         );
     }
 
-    fn ingest_en_database_from_str(
+    fn ingest_moderation_database_from_str(
         raw: &str,
         min_match_length: usize,
         bad_word_set: &mut HashSet<String>,
+        whitelist_set: &mut HashSet<String>,
         short_acronym_set: &mut HashSet<String>,
         aggressive_short_acronym_set: &mut HashSet<String>,
     ) {
-        let Ok(entries) = serde_json::from_str::<Vec<RawDbEntry>>(&raw) else {
+        let raw_without_bom = raw.trim_start_matches('\u{feff}');
+        let Ok(db) = serde_json::from_str::<RawModerationDb>(raw_without_bom) else {
             return;
         };
 
-        for entry in entries {
+        for entry in db.entries {
             let severity = entry.severity.unwrap_or(3);
             if severity < 2 {
                 continue;
@@ -1212,91 +1175,20 @@ impl JsParityEngine {
                 }
             }
         }
-    }
 
-    fn ingest_legacy_external(
-        path: &Path,
-        min_match_length: usize,
-        bad_word_set: &mut HashSet<String>,
-    ) {
-        let Ok(raw) = fs::read_to_string(path) else {
-            return;
-        };
-        Self::ingest_legacy_external_from_str(&raw, min_match_length, bad_word_set);
-    }
-
-    fn ingest_legacy_external_from_str(
-        raw: &str,
-        min_match_length: usize,
-        bad_word_set: &mut HashSet<String>,
-    ) {
-        let Ok(entries) = serde_json::from_str::<Vec<RawLegacyEntry>>(&raw) else {
-            return;
-        };
-
-        for entry in entries {
-            let is_english = match entry.lang.as_deref() {
-                Some(lang) => lang.eq_ignore_ascii_case("en"),
-                None => true,
-            };
-            if !is_english {
-                continue;
-            }
-
-            let severity = entry.severity.unwrap_or(3).clamp(1, 4);
-            if severity < 2 {
-                continue;
-            }
-
-            let Some(word) = entry.word else {
-                continue;
-            };
+        for word in db.whitelist {
             let normalized = normalize_token(&word, false);
-            if normalized.len() >= min_match_length {
-                bad_word_set.insert(normalized);
+            if !normalized.is_empty() {
+                whitelist_set.insert(normalized);
             }
         }
-    }
 
-    fn ingest_slang_abbreviations(
-        path: &Path,
-        min_match_length: usize,
-        bad_word_set: &mut HashSet<String>,
-    ) {
-        let Ok(raw) = fs::read_to_string(path) else {
-            return;
-        };
-        Self::ingest_slang_abbreviations_from_str(&raw, min_match_length, bad_word_set);
-    }
-
-    fn ingest_slang_abbreviations_from_str(
-        raw: &str,
-        min_match_length: usize,
-        bad_word_set: &mut HashSet<String>,
-    ) {
-        let Ok(map) = serde_json::from_str::<HashMap<String, String>>(&raw) else {
-            return;
-        };
-
-        for (abbr, _) in map {
+        for (abbr, _) in db.slang_map {
             let normalized = normalize_token(&abbr, false);
             if normalized.len() >= min_match_length {
                 bad_word_set.insert(normalized);
             }
         }
-    }
-
-    fn load_whitelist(path: &Path) -> HashSet<String> {
-        let Ok(raw) = fs::read_to_string(path) else {
-            return HashSet::new();
-        };
-
-        raw.lines()
-            .map(str::trim)
-            .filter(|line| !line.is_empty() && !line.starts_with('#'))
-            .map(|line| normalize_token(line, false))
-            .filter(|line| !line.is_empty())
-            .collect()
     }
 
     fn load_clean_lexicon_assets(path: &Path, limit: usize) -> (Vec<String>, Option<BloomFilter>) {
@@ -1606,7 +1498,12 @@ fn resolve_profanity_root() -> Option<PathBuf> {
         if !seen.insert(key) {
             continue;
         }
-        if candidate.join("en.json").exists() {
+        if candidate
+            .join("src")
+            .join("database")
+            .join("moderation-db.json")
+            .exists()
+        {
             return Some(candidate);
         }
     }
