@@ -1,9 +1,54 @@
 use dotenvy::dotenv;
 use moderation_engine::ModerationEngine;
 use std::env;
+use std::path::PathBuf;
 use std::sync::Arc;
 use teloxide::prelude::*;
 use tokio::time::{sleep, Duration};
+
+fn parse_bad_words(raw: &str) -> Vec<String> {
+    raw.lines()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_string())
+        .collect()
+}
+
+fn load_bad_words() -> Vec<String> {
+    let mut candidates = Vec::<PathBuf>::new();
+
+    if let Ok(raw) = env::var("OMEGA_RUST_DICT_PATH") {
+        let trimmed = raw.trim();
+        if !trimmed.is_empty() {
+            candidates.push(PathBuf::from(trimmed));
+        }
+    }
+
+    candidates.push(PathBuf::from("rust_dict.txt"));
+
+    if let Ok(exe_path) = env::current_exe() {
+        if let Some(exe_dir) = exe_path.parent() {
+            candidates.push(exe_dir.join("rust_dict.txt"));
+        }
+    }
+
+    for path in candidates {
+        if let Ok(raw) = std::fs::read_to_string(&path) {
+            let words = parse_bad_words(&raw);
+            println!(
+                "📚 Loaded {} profane patterns into L1 memory (source: {}).",
+                words.len(),
+                path.display()
+            );
+            return words;
+        }
+    }
+
+    eprintln!(
+        "⚠️ rust_dict.txt was not found. Starting with empty DFA dictionary; JS parity dictionary remains active."
+    );
+    Vec::new()
+}
 
 #[tokio::main]
 async fn main() {
@@ -16,20 +61,9 @@ async fn main() {
 
     println!("🚀 Launching native Rust Moderation Bot...");
 
-    // 2. Load the compiled lexical dictionary (moderation-db + naughty-words) into RAM
-    let dict_content = std::fs::read_to_string("rust_dict.txt")
-        .expect("Failed to read rust_dict.txt. Ensure the python script compiled it first.");
-
-    let bad_words: Vec<&str> = dict_content
-        .lines()
-        .map(|s| s.trim())
-        .filter(|s| !s.is_empty())
-        .collect();
-
-    println!(
-        "📚 Loaded {} profane patterns into L1 memory.",
-        bad_words.len()
-    );
+    // 2. Load lexical dictionary for DFA fast-path.
+    let bad_words_owned = load_bad_words();
+    let bad_words: Vec<&str> = bad_words_owned.iter().map(String::as_str).collect();
 
     let engine = Arc::new(
         ModerationEngine::new(
