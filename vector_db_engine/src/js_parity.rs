@@ -392,6 +392,11 @@ impl JsParityEngine {
         let min_match_length = DEFAULT_MIN_MATCH_LENGTH;
         let profanity_root = resolve_profanity_root();
         let en_path = profanity_root.as_ref().map(|root| root.join("en.json"));
+        let custom_blacklist_path = profanity_root.as_ref().map(|root| {
+            root.join("src")
+                .join("database")
+                .join("custom-blacklist.json")
+        });
         let legacy_external_path = profanity_root.as_ref().map(|root| {
             root.join("src")
                 .join("database")
@@ -426,6 +431,15 @@ impl JsParityEngine {
             &mut aggressive_short_acronym_set,
         );
         if let Some(path) = en_path.as_deref() {
+            Self::ingest_en_database(
+                path,
+                min_match_length,
+                &mut bad_word_set,
+                &mut short_acronym_set,
+                &mut aggressive_short_acronym_set,
+            );
+        }
+        if let Some(path) = custom_blacklist_path.as_deref() {
             Self::ingest_en_database(
                 path,
                 min_match_length,

@@ -26,10 +26,42 @@ if os.path.exists(en_path):
                 if len(clean) >= 2:
                     words.add(clean)
 
-# 3. Save to flat file for Rust Aho-Corasick Engine
+# 3. Parse custom blacklist JSON (managed via mini UI)
+custom_blacklist_path = r"D:\gemini\profanity-destroyer\src\database\custom-blacklist.json"
+if os.path.exists(custom_blacklist_path):
+    with open(custom_blacklist_path, 'r', encoding='utf-8') as f:
+        raw = f.read()
+
+    parsed = None
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError:
+        parsed = None
+
+    if isinstance(parsed, list):
+        for item in parsed:
+            if isinstance(item, dict):
+                match_str = item.get('match', '')
+                if not isinstance(match_str, str):
+                    continue
+                for part in match_str.split('|'):
+                    clean = part.replace('*', '').strip().lower()
+                    if len(clean) >= 2:
+                        words.add(clean)
+            elif isinstance(item, str):
+                clean = item.replace('*', '').strip().lower()
+                if len(clean) >= 2:
+                    words.add(clean)
+    else:
+        for line in raw.splitlines():
+            clean = line.replace('*', '').strip().lower()
+            if len(clean) >= 2 and not clean.startswith('#'):
+                words.add(clean)
+
+# 4. Save to flat file for Rust Aho-Corasick Engine
 out_path = r"D:\gemini\rust_dict.txt"
 with open(out_path, 'w', encoding='utf-8') as f:
     for w in sorted(list(words)):
         f.write(w + '\n')
 
-print(f"✅ Успешно скомпилировано {len(words)} правил из en.json и naughty-words в единый rust_dict.txt")
+print(f"Compiled {len(words)} rules from en.json, custom-blacklist, and naughty-words into rust_dict.txt")
