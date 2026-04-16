@@ -564,6 +564,38 @@ impl JsParityEngine {
         analysis
     }
 
+    pub fn should_skip_lexical_stage(&self, strict_candidates: &[Candidate]) -> bool {
+        let mut matched_candidate: Option<&Candidate> = None;
+
+        for candidate in strict_candidates {
+            let token_len = candidate.text.len();
+            if token_len < self.min_match_length || token_len > 24 {
+                continue;
+            }
+
+            if matched_candidate.is_some() {
+                return false;
+            }
+
+            matched_candidate = Some(candidate);
+        }
+
+        let Some(candidate) = matched_candidate else {
+            return false;
+        };
+
+        let token = candidate.text.as_str();
+        if self.whitelist_set.contains(token) {
+            return true;
+        }
+
+        if self.bad_word_set.contains(token) || candidate.obfuscated {
+            return false;
+        }
+
+        self.is_known_clean_word(token)
+    }
+
     pub fn should_run_vector_fallback(&self, text: &str, surface: SurfaceSignals) -> bool {
         if !self.enable_vector_fallback {
             return false;

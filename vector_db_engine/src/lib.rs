@@ -67,11 +67,18 @@ impl ModerationEngine {
     /// Returns `true` if it violated L1 or matched a scam vector in L2.
     #[inline(always)]
     pub async fn check_payload(&self, payload: &str) -> bool {
-        // Step 1: Evaluate lexical pipeline in the same order as JS detector.
-        let native_raw_hit = self.dfa.scan(payload);
-
         let mut buffer = SimdBuffer::new();
         buffer.normalize_adversarial_text(payload);
+
+        if self
+            .parity
+            .should_skip_lexical_stage(buffer.strict_candidates())
+        {
+            return false;
+        }
+
+        // Step 1: Evaluate lexical pipeline in the same order as JS detector.
+        let native_raw_hit = self.dfa.scan(payload);
 
         let analysis = self.parity.analyze(
             payload,
