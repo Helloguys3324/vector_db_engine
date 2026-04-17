@@ -67,8 +67,6 @@ const HIGH_RISK_PHRASES: [&str; 10] = [
 const EMBEDDED_MODERATION_DB_JSON: &str = include_str!("embedded_js/moderation-db.json");
 const EMBEDDED_LEGACY_EXTERNAL_JSON: &str = include_str!("embedded_js/merged-external.json");
 const EMBEDDED_DECISION_MODEL_JSON: &str = include_str!("embedded_js/decision-model.json");
-const EMBEDDED_CONTEXTUAL_WHITELIST_PHRASES: &str =
-    include_str!("embedded_js/contextual-whitelist-phrases.txt");
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Decision {
@@ -1404,12 +1402,6 @@ impl JsParityEngine {
 
     fn load_contextual_whitelist_phrases(path: Option<&Path>) -> Vec<String> {
         let mut set = HashSet::<String>::new();
-        for line in EMBEDDED_CONTEXTUAL_WHITELIST_PHRASES.lines() {
-            if let Some(normalized) = normalize_context_phrase(line) {
-                set.insert(normalized);
-            }
-        }
-
         if let Some(path) = path {
             if let Ok(raw) = fs::read_to_string(path) {
                 for line in raw.lines() {
