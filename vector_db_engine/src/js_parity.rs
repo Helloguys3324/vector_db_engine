@@ -46,6 +46,24 @@ const URGENCY_TOKENS: [&str; 11] = [
     "security",
 ];
 
+const SEMANTIC_TRIGGER_TOKENS: [&str; 21] = [
+    "die", "kill", "suicide", "yourself", "end", "rope", "jump", "wallet", "crypto", "airdrop",
+    "seed", "scam", "fraud", "phishing", "btc", "eth", "usdt", "card", "cvv", "otp", "pin",
+];
+
+const HIGH_RISK_PHRASES: [&str; 10] = [
+    "kill yourself",
+    "end yourself",
+    "go die",
+    "just die",
+    "die now",
+    "commit suicide",
+    "hang yourself",
+    "jump off",
+    "gas yourself",
+    "off yourself",
+];
+
 const EMBEDDED_MODERATION_DB_JSON: &str = include_str!("embedded_js/moderation-db.json");
 const EMBEDDED_LEGACY_EXTERNAL_JSON: &str = include_str!("embedded_js/merged-external.json");
 const EMBEDDED_DECISION_MODEL_JSON: &str = include_str!("embedded_js/decision-model.json");
@@ -561,24 +579,26 @@ impl JsParityEngine {
     }
 
     pub fn lexical_skip_reason(&self, strict_candidates: &[Candidate]) -> Option<String> {
-        let mut matched_candidate: Option<&Candidate> = None;
-
-        for candidate in strict_candidates {
-            let token_len = candidate.text.len();
-            if token_len < self.min_match_length || token_len > 24 {
-                continue;
-            }
-
-            if matched_candidate.is_some() {
-                return None;
-            }
-
-            matched_candidate = Some(candidate);
+        if strict_candidates.is_empty() {
+            return None;
         }
 
-        let Some(candidate) = matched_candidate else {
+        if strict_candidates
+            .iter()
+            .any(|candidate| Self::is_semantic_trigger_token(candidate.text.as_str()))
+        {
             return None;
-        };
+        }
+
+        if strict_candidates.len() != 1 {
+            return None;
+        }
+
+        let candidate = &strict_candidates[0];
+        let token_len = candidate.text.len();
+        if token_len < self.min_match_length || token_len > 24 {
+            return None;
+        }
 
         let token = candidate.text.as_str();
         if self.whitelist_set.contains(token) {
@@ -602,6 +622,10 @@ impl JsParityEngine {
         }
 
         let normalized = text.nfkc().collect::<String>().trim().to_string();
+        if Self::contains_semantic_trigger_signal(&normalized) {
+            return true;
+        }
+
         if normalized.len() < self.vector_fallback_min_chars {
             return false;
         }
@@ -735,6 +759,17 @@ impl JsParityEngine {
         merged_candidates: &[Candidate],
     ) -> DetectionAnalysis {
         let surface = Self::collect_surface_signals(text);
+
+        if Self::contains_high_risk_phrase(text) {
+            return DetectionAnalysis {
+                matched: true,
+                is_profane: true,
+                decision: Decision::Block,
+                score: 1.0,
+                linear: 8.0,
+                surface,
+            };
+        }
 
         if self.native_fast_path
             && !self.enable_heuristic
@@ -1517,6 +1552,31 @@ impl JsParityEngine {
             .iter()
             .any(|token| URGENCY_TOKENS.contains(&token.as_str()))
     }
+
+    fn is_semantic_trigger_token(token: &str) -> bool {
+        SEMANTIC_TRIGGER_TOKENS.contains(&token)
+    }
+
+    fn contains_semantic_trigger_signal(normalized: &str) -> bool {
+        let lowered = normalized.to_ascii_lowercase();
+        let tokens = ascii_tokens(&lowered);
+        if tokens
+            .iter()
+            .any(|token| Self::is_semantic_trigger_token(token.as_str()))
+        {
+            return true;
+        }
+        Self::contains_high_risk_phrase(&lowered)
+    }
+
+    fn contains_high_risk_phrase(text: &str) -> bool {
+        let lowered = text.nfkc().collect::<String>().to_ascii_lowercase();
+        let padded = format!(" {} ", lowered);
+        HIGH_RISK_PHRASES.iter().any(|phrase| {
+            let needle = format!(" {} ", phrase);
+            padded.contains(&needle)
+        })
+    }
 }
 
 fn resolve_profanity_root() -> Option<PathBuf> {
@@ -1933,5 +1993,47 @@ mod tests {
 
         assert!(!analysis.matched);
         assert!(!analysis.is_profane);
+    }
+
+    #[test]
+    fn does_not_skip_lexical_stage_when_trigger_word_present() {
+        let patterns = ["nigga", "nigger"];
+        let parity = JsParityEngine::new(&patterns);
+
+        let mut buffer = SimdBuffer::new();
+        buffer.normalize_adversarial_text("just die");
+
+        let reason = parity.lexical_skip_reason(buffer.strict_candidates());
+        assert!(reason.is_none());
+    }
+
+    #[test]
+    fn enables_vector_fallback_for_trigger_words() {
+        let patterns = ["nigga", "nigger"];
+        let parity = JsParityEngine::new(&patterns);
+        let analysis = parity.analyze("just die", false, &[], &[], &[]);
+
+        assert!(parity.should_run_vector_fallback("just die", analysis.surface));
+    }
+
+    #[test]
+    fn blocks_high_risk_phrase_even_without_raw_hit() {
+        let patterns = ["nigga", "nigger"];
+        let parity = JsParityEngine::new(&patterns);
+        let dfa = DfaEngine::new(&patterns);
+        let text = "just end yourself finally";
+
+        let mut buffer = SimdBuffer::new();
+        buffer.normalize_adversarial_text(text);
+        let analysis = parity.analyze(
+            text,
+            dfa.scan(text),
+            buffer.strict_candidates(),
+            buffer.collapsed_candidates(),
+            buffer.merged_candidates(),
+        );
+
+        assert!(analysis.matched);
+        assert!(analysis.is_profane);
     }
 }

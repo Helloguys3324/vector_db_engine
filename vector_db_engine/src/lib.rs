@@ -136,7 +136,7 @@ impl ModerationEngine {
         }
 
         // Step 1: Evaluate lexical pipeline in the same order as JS detector.
-        let native_raw_hit = self.dfa.scan(payload);
+        let native_raw_hit = self.dfa.scan(payload) || self.dfa.scan(buffer.as_str());
         if self.trace_enabled {
             println!("[dfa] native_raw_hit={}", native_raw_hit);
         }
