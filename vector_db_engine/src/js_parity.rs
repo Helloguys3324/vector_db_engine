@@ -47,6 +47,7 @@ const URGENCY_TOKENS: [&str; 11] = [
 ];
 
 const EMBEDDED_MODERATION_DB_JSON: &str = include_str!("embedded_js/moderation-db.json");
+const EMBEDDED_LEGACY_EXTERNAL_JSON: &str = include_str!("embedded_js/merged-external.json");
 const EMBEDDED_DECISION_MODEL_JSON: &str = include_str!("embedded_js/decision-model.json");
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -402,6 +403,12 @@ impl JsParityEngine {
         let moderation_db_path = profanity_root
             .as_ref()
             .map(|root| root.join("src").join("database").join("moderation-db.json"));
+        let legacy_external_path = profanity_root.as_ref().map(|root| {
+            root.join("src")
+                .join("database")
+                .join("external")
+                .join("merged-external.json")
+        });
         let clean_lexicon_path = profanity_root
             .as_ref()
             .map(|root| root.join("Largest.list.of.english.words.txt"));
@@ -431,6 +438,19 @@ impl JsParityEngine {
                 &mut short_acronym_set,
                 &mut aggressive_short_acronym_set,
             );
+        }
+
+        let exclude_legacy_external =
+            std::env::var("OMEGA_EXCLUDE_LEGACY_EXTERNAL").unwrap_or_default() == "1";
+        if !exclude_legacy_external {
+            Self::ingest_legacy_external_from_str(
+                EMBEDDED_LEGACY_EXTERNAL_JSON,
+                min_match_length,
+                &mut bad_word_set,
+            );
+            if let Some(path) = legacy_external_path.as_deref() {
+                Self::ingest_legacy_external(path, min_match_length, &mut bad_word_set);
+            }
         }
 
         // If JS sources are unavailable, fall back to precompiled Rust patterns.
@@ -537,6 +557,10 @@ impl JsParityEngine {
     }
 
     pub fn should_skip_lexical_stage(&self, strict_candidates: &[Candidate]) -> bool {
+        self.lexical_skip_reason(strict_candidates).is_some()
+    }
+
+    pub fn lexical_skip_reason(&self, strict_candidates: &[Candidate]) -> Option<String> {
         let mut matched_candidate: Option<&Candidate> = None;
 
         for candidate in strict_candidates {
@@ -546,26 +570,30 @@ impl JsParityEngine {
             }
 
             if matched_candidate.is_some() {
-                return false;
+                return None;
             }
 
             matched_candidate = Some(candidate);
         }
 
         let Some(candidate) = matched_candidate else {
-            return false;
+            return None;
         };
 
         let token = candidate.text.as_str();
         if self.whitelist_set.contains(token) {
-            return true;
+            return Some(format!("single-token whitelist hit '{}'", token));
         }
 
         if self.bad_word_set.contains(token) || candidate.obfuscated {
-            return false;
+            return None;
         }
 
-        self.is_known_clean_word(token)
+        if self.is_known_clean_word(token) {
+            Some(format!("single-token clean-lexicon hit '{}'", token))
+        } else {
+            None
+        }
     }
 
     pub fn should_run_vector_fallback(&self, text: &str, surface: SurfaceSignals) -> bool {
@@ -1184,6 +1212,50 @@ impl JsParityEngine {
 
         for (abbr, _) in db.slang_map {
             let normalized = normalize_token(&abbr, false);
+            if normalized.len() >= min_match_length {
+                bad_word_set.insert(normalized);
+            }
+        }
+    }
+
+    fn ingest_legacy_external(
+        path: &Path,
+        min_match_length: usize,
+        bad_word_set: &mut HashSet<String>,
+    ) {
+        let Ok(raw) = fs::read_to_string(path) else {
+            return;
+        };
+        Self::ingest_legacy_external_from_str(&raw, min_match_length, bad_word_set);
+    }
+
+    fn ingest_legacy_external_from_str(
+        raw: &str,
+        min_match_length: usize,
+        bad_word_set: &mut HashSet<String>,
+    ) {
+        let Ok(entries) = serde_json::from_str::<Vec<RawLegacyEntry>>(raw) else {
+            return;
+        };
+
+        for entry in entries {
+            let is_english = match entry.lang.as_deref() {
+                Some(lang) => lang.eq_ignore_ascii_case("en"),
+                None => true,
+            };
+            if !is_english {
+                continue;
+            }
+
+            let severity = entry.severity.unwrap_or(3).clamp(1, 4);
+            if severity < 2 {
+                continue;
+            }
+
+            let Some(word) = entry.word else {
+                continue;
+            };
+            let normalized = normalize_token(&word, false);
             if normalized.len() >= min_match_length {
                 bad_word_set.insert(normalized);
             }
