@@ -30,24 +30,27 @@ impl SemanticEngine {
         tokenizer_path: &str,
         qdrant_url: &str,
         collection_name: &str,
-    ) -> ort::Result<Self> {
+    ) -> Result<Self, String> {
         let _ = ort::init().with_name("antigravity-l2").commit(); // Returns Result, we ignore if already initialized
 
-        let session = Session::builder()?
-            .with_optimization_level(GraphOptimizationLevel::Level3)?
-            .with_intra_threads(4)?
-            .commit_from_file(model_path)?;
+        let session = Session::builder()
+            .map_err(|err| err.to_string())?
+            .with_optimization_level(GraphOptimizationLevel::Level3)
+            .map_err(|err| err.to_string())?
+            .with_intra_threads(4)
+            .map_err(|err| err.to_string())?
+            .commit_from_file(model_path)
+            .map_err(|err| err.to_string())?;
         let expects_token_type_ids = session
             .inputs()
             .iter()
             .any(|input| input.name().eq_ignore_ascii_case("token_type_ids"));
 
-        let tokenizer =
-            Tokenizer::from_file(tokenizer_path).expect("Failed to load tokenizer.json");
+        let tokenizer = Tokenizer::from_file(tokenizer_path).map_err(|err| err.to_string())?;
 
         let qdrant = QdrantClient::from_url(qdrant_url)
             .build()
-            .expect("Failed to connect to Qdrant");
+            .map_err(|err| err.to_string())?;
 
         // Assure collection exists.
         if !qdrant
@@ -70,7 +73,7 @@ impl SemanticEngine {
                     ..Default::default()
                 })
                 .await
-                .expect("Failed to create collection");
+                .map_err(|err| err.to_string())?;
 
             println!("✅ Created Qdrant collection '{}'", collection_name);
 

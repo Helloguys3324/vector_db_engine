@@ -1,7 +1,7 @@
 use dotenvy::dotenv;
 use moderation_engine::ModerationEngine;
 use std::env;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use teloxide::prelude::*;
 use tokio::time::{sleep, Duration};
@@ -50,6 +50,54 @@ fn load_bad_words() -> Vec<String> {
     Vec::new()
 }
 
+fn resolve_l2_asset_path(env_var: &str, file_name: &str) -> String {
+    let mut candidates = Vec::<PathBuf>::new();
+
+    if let Ok(raw) = env::var(env_var) {
+        let trimmed = raw.trim();
+        if !trimmed.is_empty() {
+            candidates.push(PathBuf::from(trimmed));
+        }
+    }
+
+    candidates.push(
+        PathBuf::from("vector_db_engine")
+            .join("models")
+            .join(file_name),
+    );
+    candidates.push(PathBuf::from("models").join(file_name));
+
+    if let Ok(exe_path) = env::current_exe() {
+        if let Some(exe_dir) = exe_path.parent() {
+            candidates.push(exe_dir.join(file_name));
+            candidates.push(exe_dir.join("models").join(file_name));
+            candidates.push(
+                exe_dir
+                    .join("vector_db_engine")
+                    .join("models")
+                    .join(file_name),
+            );
+        }
+    }
+
+    for path in &candidates {
+        if path.exists() {
+            println!("📦 Using {} from {}", file_name, path.display());
+            return path.to_string_lossy().to_string();
+        }
+    }
+
+    let fallback = candidates
+        .into_iter()
+        .next()
+        .unwrap_or_else(|| Path::new(file_name).to_path_buf());
+    eprintln!(
+        "⚠️ {} was not found via {}. L2 may run in degraded mode.",
+        file_name, env_var
+    );
+    fallback.to_string_lossy().to_string()
+}
+
 #[tokio::main]
 async fn main() {
     // 1. Load core environment configs from .env in the current working directory
@@ -64,12 +112,14 @@ async fn main() {
     // 2. Load lexical dictionary for DFA fast-path.
     let bad_words_owned = load_bad_words();
     let bad_words: Vec<&str> = bad_words_owned.iter().map(String::as_str).collect();
+    let model_path = resolve_l2_asset_path("OMEGA_MODEL_PATH", "model_quantized.onnx");
+    let tokenizer_path = resolve_l2_asset_path("OMEGA_TOKENIZER_PATH", "tokenizer.json");
 
     let engine = Arc::new(
         ModerationEngine::new(
             &bad_words,
-            "vector_db_engine/models/model_quantized.onnx",
-            "vector_db_engine/models/tokenizer.json",
+            &model_path,
+            &tokenizer_path,
             "http://localhost:6334",
             "scam_patterns",
         )

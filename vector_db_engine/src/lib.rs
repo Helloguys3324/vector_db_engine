@@ -13,7 +13,7 @@ use simd_preprocessor::{normalize_token, Candidate, SimdBuffer};
 pub struct ModerationEngine {
     dfa: DfaEngine,
     parity: JsParityEngine,
-    semantic: SemanticEngine,
+    semantic: Option<SemanticEngine>,
     trace_enabled: bool,
 }
 
@@ -25,9 +25,23 @@ impl ModerationEngine {
         qdrant_url: &str,
         collection_name: &str,
     ) -> Self {
-        let semantic = SemanticEngine::new(model_path, tokenizer_path, qdrant_url, collection_name)
-            .await
-            .expect("Failed to initialize L2 Semantic Engine");
+        let semantic = match SemanticEngine::new(
+            model_path,
+            tokenizer_path,
+            qdrant_url,
+            collection_name,
+        )
+        .await
+        {
+            Ok(engine) => Some(engine),
+            Err(err) => {
+                eprintln!(
+                    "⚠️ Failed to initialize L2 Semantic Engine. Running L1-only mode. Details: {}",
+                    err
+                );
+                None
+            }
+        };
         let parity = JsParityEngine::new(patterns);
         let trace_enabled = moderation_trace_enabled();
 
@@ -39,16 +53,20 @@ impl ModerationEngine {
         if profanity_seed_limit > 0 {
             let seed_terms = parity.profanity_seed_terms(profanity_seed_limit);
             if !seed_terms.is_empty() {
-                match semantic.bootstrap_profanity_lexicon(&seed_terms).await {
-                    Ok(inserted) => {
-                        println!(
-                            "🧠 Seeded {} profanity vectors for 80% semantic matching.",
-                            inserted
-                        );
+                if let Some(semantic) = &semantic {
+                    match semantic.bootstrap_profanity_lexicon(&seed_terms).await {
+                        Ok(inserted) => {
+                            println!(
+                                "🧠 Seeded {} profanity vectors for 80% semantic matching.",
+                                inserted
+                            );
+                        }
+                        Err(err) => {
+                            eprintln!("⚠️ Failed to seed profanity vectors: {}", err);
+                        }
                     }
-                    Err(err) => {
-                        eprintln!("⚠️ Failed to seed profanity vectors: {}", err);
-                    }
+                } else {
+                    eprintln!("⚠️ Skipping profanity seed bootstrap because L2 is disabled.");
                 }
             }
         }
@@ -63,7 +81,11 @@ impl ModerationEngine {
 
     /// Dynamically train the Neural Network from the chat interface
     pub async fn train_payload(&self, text: &str) -> Result<(), String> {
-        self.semantic.train_payload(text).await
+        if let Some(semantic) = &self.semantic {
+            semantic.train_payload(text).await
+        } else {
+            Err("L2 semantic engine is disabled (missing model/tokenizer).".to_string())
+        }
     }
 
     /// Process a string through the hybrid L1 (DFA) + L2 (ONNX + Qdrant) path.
@@ -172,20 +194,23 @@ impl ModerationEngine {
                 profanity_candidates
             );
         }
-        if !profanity_candidates.is_empty()
-            && self
-                .semantic
-                .scan_profanity_candidates(&profanity_candidates)
-                .await
-        {
-            if self.trace_enabled {
-                println!("[l2.profanity] semantic_hit=true");
-                println!("[final] decision=BLOCK reason=semantic_profanity");
+        if let Some(semantic) = &self.semantic {
+            if !profanity_candidates.is_empty()
+                && semantic
+                    .scan_profanity_candidates(&profanity_candidates)
+                    .await
+            {
+                if self.trace_enabled {
+                    println!("[l2.profanity] semantic_hit=true");
+                    println!("[final] decision=BLOCK reason=semantic_profanity");
+                }
+                return true;
             }
-            return true;
-        }
-        if self.trace_enabled && !profanity_candidates.is_empty() {
-            println!("[l2.profanity] semantic_hit=false");
+            if self.trace_enabled && !profanity_candidates.is_empty() {
+                println!("[l2.profanity] semantic_hit=false");
+            }
+        } else if self.trace_enabled {
+            println!("[l2.profanity] skipped (L2 disabled)");
         }
 
         // Step 3: Run broad vector fallback only when lexical path does not match
@@ -197,15 +222,20 @@ impl ModerationEngine {
             println!("[l2.fallback] enabled={}", should_vector_fallback);
         }
         if should_vector_fallback {
-            let semantic_hit = self.semantic.scan_semantic(payload).await;
-            if self.trace_enabled {
-                println!("[l2.fallback] semantic_hit={}", semantic_hit);
-                println!(
-                    "[final] decision={} reason=semantic_fallback",
-                    if semantic_hit { "BLOCK" } else { "ALLOW" }
-                );
+            if let Some(semantic) = &self.semantic {
+                let semantic_hit = semantic.scan_semantic(payload).await;
+                if self.trace_enabled {
+                    println!("[l2.fallback] semantic_hit={}", semantic_hit);
+                    println!(
+                        "[final] decision={} reason=semantic_fallback",
+                        if semantic_hit { "BLOCK" } else { "ALLOW" }
+                    );
+                }
+                return semantic_hit;
             }
-            return semantic_hit;
+            if self.trace_enabled {
+                println!("[l2.fallback] skipped (L2 disabled)");
+            }
         }
 
         if self.trace_enabled {
