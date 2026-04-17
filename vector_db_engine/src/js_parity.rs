@@ -67,6 +67,8 @@ const HIGH_RISK_PHRASES: [&str; 10] = [
 const EMBEDDED_MODERATION_DB_JSON: &str = include_str!("embedded_js/moderation-db.json");
 const EMBEDDED_LEGACY_EXTERNAL_JSON: &str = include_str!("embedded_js/merged-external.json");
 const EMBEDDED_DECISION_MODEL_JSON: &str = include_str!("embedded_js/decision-model.json");
+const EMBEDDED_CONTEXTUAL_WHITELIST_PHRASES: &str =
+    include_str!("embedded_js/contextual-whitelist-phrases.txt");
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Decision {
@@ -410,6 +412,7 @@ pub struct JsParityEngine {
     enable_vector_fallback: bool,
     vector_fallback_min_chars: usize,
     vector_fallback_min_tokens: usize,
+    contextual_whitelist_phrases: Vec<String>,
     analysis_cache_size: usize,
     analysis_cache: Mutex<AnalysisCache>,
 }
@@ -433,6 +436,7 @@ impl JsParityEngine {
         let decision_model_path = profanity_root
             .as_ref()
             .map(|root| root.join("src").join("config").join("decision-model.json"));
+        let context_phrase_path = resolve_context_phrase_path();
 
         let mut bad_word_set = HashSet::<String>::new();
         let mut whitelist_set = HashSet::<String>::new();
@@ -502,6 +506,8 @@ impl JsParityEngine {
         if let Some(path) = decision_model_path.as_deref() {
             decision_model = Self::load_decision_model(path, decision_model);
         }
+        let contextual_whitelist_phrases =
+            Self::load_contextual_whitelist_phrases(context_phrase_path.as_deref());
 
         Self {
             min_match_length,
@@ -522,6 +528,7 @@ impl JsParityEngine {
             enable_vector_fallback: true,
             vector_fallback_min_chars: DEFAULT_VECTOR_FALLBACK_MIN_CHARS,
             vector_fallback_min_tokens: DEFAULT_VECTOR_FALLBACK_MIN_TOKENS,
+            contextual_whitelist_phrases,
             analysis_cache_size: DEFAULT_ANALYSIS_CACHE_SIZE.clamp(0, MAX_ANALYSIS_CACHE_SIZE),
             analysis_cache: Mutex::new(AnalysisCache::default()),
         }
@@ -647,6 +654,51 @@ impl JsParityEngine {
         let has_urgency = Self::contains_urgency_signal(&normalized);
 
         has_link || has_money || has_urgency || token_count >= self.vector_fallback_min_tokens + 2
+    }
+
+    pub fn contextual_whitelist_phrase_reason(
+        &self,
+        text: &str,
+        strict_candidates: &[Candidate],
+    ) -> Option<String> {
+        if self.contextual_whitelist_phrases.is_empty() || strict_candidates.is_empty() {
+            return None;
+        }
+
+        let normalized = text.nfkc().collect::<String>().to_ascii_lowercase();
+        let tokens = ascii_tokens(&normalized);
+        if tokens.len() < 2 || tokens.len() > 48 {
+            return None;
+        }
+
+        if !tokens
+            .iter()
+            .any(|token| Self::is_semantic_trigger_token(token.as_str()))
+        {
+            return None;
+        }
+
+        if tokens.iter().any(|token| self.bad_word_set.contains(token)) {
+            return None;
+        }
+
+        let all_clean = tokens
+            .iter()
+            .all(|token| self.whitelist_set.contains(token) || self.is_known_clean_word(token));
+        if !all_clean {
+            return None;
+        }
+
+        let compact = tokens.join(" ");
+        let padded = format!(" {} ", compact);
+        for phrase in &self.contextual_whitelist_phrases {
+            let needle = format!(" {} ", phrase);
+            if padded.contains(&needle) {
+                return Some(phrase.clone());
+            }
+        }
+
+        None
     }
 
     pub fn profanity_seed_terms(&self, max_terms: usize) -> Vec<String> {
@@ -1350,6 +1402,29 @@ impl JsParityEngine {
         (top_words, Some(bloom))
     }
 
+    fn load_contextual_whitelist_phrases(path: Option<&Path>) -> Vec<String> {
+        let mut set = HashSet::<String>::new();
+        for line in EMBEDDED_CONTEXTUAL_WHITELIST_PHRASES.lines() {
+            if let Some(normalized) = normalize_context_phrase(line) {
+                set.insert(normalized);
+            }
+        }
+
+        if let Some(path) = path {
+            if let Ok(raw) = fs::read_to_string(path) {
+                for line in raw.lines() {
+                    if let Some(normalized) = normalize_context_phrase(line) {
+                        set.insert(normalized);
+                    }
+                }
+            }
+        }
+
+        let mut out = set.into_iter().collect::<Vec<_>>();
+        out.sort_unstable();
+        out
+    }
+
     fn build_bad_word_indexes(
         bad_word_set: &HashSet<String>,
         min_match_length: usize,
@@ -1640,6 +1715,58 @@ fn resolve_profanity_root() -> Option<PathBuf> {
     }
 
     None
+}
+
+fn resolve_context_phrase_path() -> Option<PathBuf> {
+    let mut candidates = Vec::<PathBuf>::new();
+
+    if let Ok(raw) = std::env::var("OMEGA_CONTEXT_PHRASE_PATH") {
+        let trimmed = raw.trim();
+        if !trimmed.is_empty() {
+            candidates.push(PathBuf::from(trimmed));
+        }
+    }
+
+    if let Ok(cwd) = std::env::current_dir() {
+        candidates.push(
+            cwd.join("datasets")
+                .join("contextual_whitelist_phrases.txt"),
+        );
+        candidates.push(
+            cwd.join("vector_db_engine")
+                .join("src")
+                .join("embedded_js")
+                .join("contextual-whitelist-phrases.txt"),
+        );
+    }
+
+    if let Ok(exe_path) = std::env::current_exe() {
+        if let Some(exe_dir) = exe_path.parent() {
+            candidates.push(
+                exe_dir
+                    .join("datasets")
+                    .join("contextual_whitelist_phrases.txt"),
+            );
+            candidates.push(exe_dir.join("contextual_whitelist_phrases.txt"));
+        }
+    }
+
+    for candidate in candidates {
+        if candidate.exists() {
+            return Some(candidate);
+        }
+    }
+
+    None
+}
+
+fn normalize_context_phrase(raw: &str) -> Option<String> {
+    let normalized = raw.nfkc().collect::<String>().to_ascii_lowercase();
+    let tokens = ascii_tokens(&normalized);
+    if tokens.len() < 2 || tokens.len() > 24 {
+        return None;
+    }
+    Some(tokens.join(" "))
 }
 
 fn bool_to_f32(v: bool) -> f32 {
@@ -2035,5 +2162,29 @@ mod tests {
 
         assert!(analysis.matched);
         assert!(analysis.is_profane);
+    }
+
+    #[test]
+    fn contextual_whitelist_phrase_detects_self_harm_phrase() {
+        let patterns = ["nigga", "nigger"];
+        let parity = JsParityEngine::new(&patterns);
+        let text = "just end yourself finally";
+
+        let mut buffer = SimdBuffer::new();
+        buffer.normalize_adversarial_text(text);
+        let reason = parity.contextual_whitelist_phrase_reason(text, buffer.strict_candidates());
+        assert!(reason.is_some());
+    }
+
+    #[test]
+    fn contextual_whitelist_phrase_ignores_non_clean_sentence() {
+        let patterns = ["nigga", "nigger"];
+        let parity = JsParityEngine::new(&patterns);
+        let text = "just end yourself nigga";
+
+        let mut buffer = SimdBuffer::new();
+        buffer.normalize_adversarial_text(text);
+        let reason = parity.contextual_whitelist_phrase_reason(text, buffer.strict_candidates());
+        assert!(reason.is_none());
     }
 }

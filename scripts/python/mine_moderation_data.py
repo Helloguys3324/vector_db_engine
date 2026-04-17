@@ -23,6 +23,7 @@ DEFAULT_MAX_CONTEXTS = 5_000
 RTP_TOXICITY_THRESHOLD = 0.8
 DEFAULT_MIN_GENERIC_TOXIC_SCORE = 0.5
 DEFAULT_MAX_PER_DATASET = 300_000
+DEFAULT_MAX_CONTEXT_PHRASES = 200_000
 
 TOXIC_DATASET_SPECS = [
     {
@@ -85,6 +86,23 @@ TOXIC_DATASET_SPECS = [
         "type": "berkeley_hate_score",
         "splits": ["train"],
     },
+    {
+        "id": "tweet_eval",
+        "type": "tweet_eval_binary",
+        "config": "hate",
+        "splits": ["train"],
+    },
+    {
+        "id": "tweet_eval",
+        "type": "tweet_eval_binary",
+        "config": "offensive",
+        "splits": ["train"],
+    },
+    {
+        "id": "s-nlp/paradetox",
+        "type": "paradetox_pairs",
+        "splits": ["train"],
+    },
 ]
 
 TOXIC_STEM_PATTERNS = (
@@ -116,6 +134,30 @@ TOXIC_PHRASE_KEYWORDS = (
     "fraud",
     "phishing",
 )
+
+CONTEXT_TRIGGER_TOKENS = {
+    "die",
+    "kill",
+    "suicide",
+    "yourself",
+    "end",
+    "rope",
+    "jump",
+    "wallet",
+    "crypto",
+    "airdrop",
+    "seed",
+    "scam",
+    "fraud",
+    "phishing",
+    "btc",
+    "eth",
+    "usdt",
+    "card",
+    "cvv",
+    "otp",
+    "pin",
+}
 
 
 def to_float(value, default: float = 0.0) -> float:
@@ -204,6 +246,23 @@ def parse_args() -> argparse.Namespace:
         "--triplets-output",
         default=str(Path("datasets") / "mined_toxic_triplets.jsonl"),
         help="Output path for mined triplets JSONL.",
+    )
+    parser.add_argument(
+        "--context-phrases-output",
+        default=str(Path("datasets") / "contextual_whitelist_phrases.txt"),
+        help=(
+            "Output path for contextual whitelist phrases used before vector stage "
+            "(default: datasets/contextual_whitelist_phrases.txt)."
+        ),
+    )
+    parser.add_argument(
+        "--max-context-phrases",
+        type=int,
+        default=DEFAULT_MAX_CONTEXT_PHRASES,
+        help=(
+            "Maximum contextual whitelist phrases to collect from toxic datasets "
+            f"(default: {DEFAULT_MAX_CONTEXT_PHRASES})."
+        ),
     )
     return parser.parse_args()
 
@@ -559,6 +618,22 @@ def extract_toxic_text_and_score(
             score,
         )
 
+    if source_type == "tweet_eval_binary":
+        # tweet_eval hate/offensive: label 1 = toxic/offensive, 0 = not toxic
+        label = to_int(row.get("label"))
+        if label is None or label != 1:
+            return None
+        return row_text_value(row, ("text", "tweet", "comment", "content")), 0.95
+
+    if source_type == "paradetox_pairs":
+        # Dataset contains toxic -> neutral paraphrase pairs.
+        toxic_text = row_text_value(
+            row, ("en_toxic_comment", "toxic_comment", "toxic", "text")
+        )
+        if not toxic_text:
+            return None
+        return toxic_text, 0.98
+
     return None
 
 
@@ -821,10 +896,34 @@ def mine_toxic_contexts(
     progress_every: int,
     max_per_dataset: int,
     min_generic_toxic_score: float,
-) -> tuple[list[dict], Counter]:
+    max_context_phrases: int,
+) -> tuple[list[dict], Counter, set[str]]:
     records: list[dict] = []
     source_counter: Counter = Counter()
     seen_contexts: set[str] = set()
+    contextual_whitelist_phrases: set[str] = set()
+
+    def try_add_contextual_phrase(raw_text: str) -> None:
+        if len(contextual_whitelist_phrases) >= max_context_phrases:
+            return
+
+        cleaned = clean_context(raw_text)
+        if len(cleaned) < 8:
+            return
+
+        tokens = [tok for tok in tokenize_words(cleaned) if len(tok) >= 2]
+        if len(tokens) < 2:
+            return
+        if len(tokens) > 24:
+            return
+        if not any(token in CONTEXT_TRIGGER_TOKENS for token in tokens):
+            return
+        if not all(token in whitelist_words for token in tokens):
+            return
+
+        phrase = " ".join(tokens)
+        if 8 <= len(phrase) <= 180:
+            contextual_whitelist_phrases.add(phrase)
 
     def try_add_record(source: str, raw_text: str, toxicity_score: float) -> None:
         if len(records) >= max_contexts:
@@ -890,6 +989,7 @@ def mine_toxic_contexts(
                 continue
 
             raw_text, score = extracted
+            try_add_contextual_phrase(raw_text)
             before = len(records)
             try_add_record(source_key, raw_text, score)
             if len(records) > before:
@@ -901,7 +1001,8 @@ def mine_toxic_contexts(
         )
 
     print(f"[toxicity] Final contexts mined: {len(records):,}")
-    return records, source_counter
+    print(f"[toxicity] Contextual whitelist phrases mined: {len(contextual_whitelist_phrases):,}")
+    return records, source_counter, contextual_whitelist_phrases
 
 
 def save_toxic_contexts(records: list[dict], source_counter: Counter, output_path: Path) -> None:
@@ -916,6 +1017,17 @@ def save_toxic_contexts(records: list[dict], source_counter: Counter, output_pat
     print(f"[toxicity] Saved {len(records):,} contexts -> {output_path}")
 
 
+def save_contextual_whitelist_phrases(phrases: set[str], output_path: Path) -> None:
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    sorted_phrases = sorted(phrases)
+    with output_path.open("w", encoding="utf-8") as f:
+        for phrase in sorted_phrases:
+            f.write(f"{phrase}\n")
+    print(
+        f"[toxicity] Saved {len(sorted_phrases):,} contextual whitelist phrases -> {output_path}"
+    )
+
+
 def main() -> None:
     args = parse_args()
     repo_root = Path(__file__).resolve().parents[2]
@@ -925,8 +1037,11 @@ def main() -> None:
     )
     mined_toxicity_path = repo_root / "datasets" / "mined_toxicity.json"
     triplets_output_path = Path(args.triplets_output)
+    context_phrases_output_path = Path(args.context_phrases_output)
     if not triplets_output_path.is_absolute():
         triplets_output_path = (repo_root / triplets_output_path).resolve()
+    if not context_phrases_output_path.is_absolute():
+        context_phrases_output_path = (repo_root / context_phrases_output_path).resolve()
 
     print("[start] Generating whitelist...")
     whitelist_words = generate_whitelist_words()
@@ -934,15 +1049,17 @@ def main() -> None:
 
     print("[start] Mining toxic contexts with streaming datasets...")
     seed_profane_words = load_seed_profane_words(repo_root)
-    records, source_counter = mine_toxic_contexts(
+    records, source_counter, context_phrases = mine_toxic_contexts(
         whitelist_words=whitelist_words,
         seed_profane_words=seed_profane_words,
         max_contexts=max(1, args.max_contexts),
         progress_every=max(1, args.progress_every),
         max_per_dataset=max(1, args.max_per_dataset),
         min_generic_toxic_score=max(0.0, min(1.0, args.min_generic_toxic_score)),
+        max_context_phrases=max(1, args.max_context_phrases),
     )
     save_toxic_contexts(records, source_counter, mined_toxicity_path)
+    save_contextual_whitelist_phrases(context_phrases, context_phrases_output_path)
 
     if args.enable_lmsys_triplets:
         print("[start] Mining LMSYS toxic-vs-clean triplets...")

@@ -181,6 +181,20 @@ impl ModerationEngine {
             return analysis.is_profane;
         }
 
+        if let Some(context_reason) = self
+            .parity
+            .contextual_whitelist_phrase_reason(payload, buffer.strict_candidates())
+        {
+            if self.trace_enabled {
+                println!(
+                    "[pre-l2.context] matched contextual whitelist phrase '{}'",
+                    context_reason
+                );
+                println!("[final] decision=BLOCK reason=contextual_whitelist_phrase");
+            }
+            return true;
+        }
+
         // Step 2: Probe semantic profanity similarity (>= 0.80) for unresolved obfuscated tokens.
         let profanity_candidates = self.parity.profanity_vector_candidates(
             payload,
