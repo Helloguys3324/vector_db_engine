@@ -428,6 +428,9 @@ impl JsParityEngine {
                 .join("external")
                 .join("merged-external.json")
         });
+        let whitelist_words_path = profanity_root
+            .as_ref()
+            .map(|root| root.join("src").join("database").join("whitelist.txt"));
         let clean_lexicon_path = profanity_root
             .as_ref()
             .map(|root| root.join("Largest.list.of.english.words.txt"));
@@ -458,6 +461,9 @@ impl JsParityEngine {
                 &mut short_acronym_set,
                 &mut aggressive_short_acronym_set,
             );
+        }
+        if let Some(path) = whitelist_words_path.as_deref() {
+            Self::ingest_whitelist_words(path, &mut whitelist_set);
         }
 
         let exclude_legacy_external =
@@ -1299,6 +1305,23 @@ impl JsParityEngine {
             let normalized = normalize_token(&abbr, false);
             if normalized.len() >= min_match_length {
                 bad_word_set.insert(normalized);
+            }
+        }
+    }
+
+    fn ingest_whitelist_words(path: &Path, whitelist_set: &mut HashSet<String>) {
+        let Ok(raw) = fs::read_to_string(path) else {
+            return;
+        };
+
+        for line in raw.lines() {
+            let trimmed = line.trim();
+            if trimmed.is_empty() || trimmed.starts_with('#') {
+                continue;
+            }
+            let normalized = normalize_token(trimmed, false);
+            if !normalized.is_empty() {
+                whitelist_set.insert(normalized);
             }
         }
     }

@@ -343,6 +343,11 @@ Features:
 - Review unified moderation database
 - Trigger dictionary rebuild (`rust_dict.txt`)
 
+Runtime whitelist sources used by `telegram_bot`:
+
+- `profanity-destroyer/src/database/moderation-db.json` → `whitelist`
+- `profanity-destroyer/src/database/whitelist.txt` (line-based whitelist words)
+
 ---
 
 ## Troubleshooting
