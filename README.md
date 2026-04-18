@@ -1,199 +1,155 @@
-# Gemini Moderation Stack
+<div align="center">
 
-Гибридный проект модерации сообщений для Telegram:
+# 🛡️ Gemini Moderation Stack
 
-1. **L1 (лексика):** быстрый Rust-пайплайн для детекта мата и обфускаций.
-2. **L2 (семантика):** ONNX + Qdrant для семантического детекта (в первую очередь скам / сложные случаи).
-3. **JS-ветка (`profanity-destroyer`):** исторический/параллельный движок, база слов и утилиты управления словарями.
+**Hybrid Telegram message moderation engine**  
+**Гибридный движок модерации сообщений для Telegram**
+
+[![Rust](https://img.shields.io/badge/Rust-stable-orange?logo=rust)](https://www.rust-lang.org/)
+[![Python](https://img.shields.io/badge/Python-3.10+-blue?logo=python)](https://www.python.org/)
+[![Node.js](https://img.shields.io/badge/Node.js-18+-green?logo=node.js)](https://nodejs.org/)
+[![Qdrant](https://img.shields.io/badge/Qdrant-vector_db-red?logo=qdrant)](https://qdrant.tech/)
+[![Django](https://img.shields.io/badge/Django-dashboard-darkgreen?logo=django)](https://www.djangoproject.com/)
 
 ---
 
-## 1) Карта репозитория
+*[English](#english) · [Русский](#русский)*
 
-```text
-D:\gemini
-├─ Cargo.toml                      # Rust workspace (vector_db_engine + telegram_bot)
-├─ rust_dict.txt                   # Плоский словарь для L1
-├─ scripts\
-│  └─ python\
-│     ├─ build_rust_dictionary.py          # Сборка rust_dict.txt из словарей
-│     ├─ seed_qdrant_from_hf.py            # Первичное наполнение Qdrant скам-датасетами
-│     ├─ seed_qdrant_from_local_datasets.py# Дозаливка локальных датасетов в Qdrant
-│     ├─ seed_qdrant_nitro_examples.py     # Дозаливка Nitro scam-паттернов
-│     └─ seed_qdrant_from_mined_toxicity.py# Загрузка mined_toxicity в live_trained_profanity
-├─ dashboard\                      # Django dashboard (каналы + админка)
-│  ├─ manage.py
-│  ├─ config\                      # Django project config
-│  ├─ channels_app\                # Модели/вьюхи каналов модерации
-│  ├─ templates\dashboard\         # UI-шаблоны dashboard
-│  └─ static\dashboard\            # Стили dashboard
-├─ not used\                       # Архив неучаствующих в пайплайне файлов
-├─ vector_db_engine\               # Rust-библиотека движка модерации
-│  ├─ Cargo.toml
-│  ├─ models\
-│  │  ├─ model_quantized.onnx
-│  │  └─ tokenizer.json
-│  └─ src\
-│     ├─ lib.rs                    # Orchestrator L1/L2
-│     ├─ dfa_fast_path.rs          # Aho-Corasick + fuzzy (Damerau-Levenshtein)
-│     ├─ simd_preprocessor.rs      # Нормализация/кандидаты обфускаций
-│     ├─ js_parity.rs              # JS-паритет логики + decision layer
-│     ├─ l2_semantic.rs            # ONNX embedding + Qdrant search/upsert
-│     ├─ disruptor.rs              # Lock-free очередь (вспомогательный модуль)
-│     ├─ embedded_js\              # Встроенные fallback JSON
-│     └─ test_api.rs               # Мини smoke-файл для qdrant-client
-├─ telegram_bot\
-│  ├─ Cargo.toml
-│  └─ src\main.rs                  # Telegram runtime + /train команда
-└─ profanity-destroyer\            # Отдельный JS-проект (со своим .git)
-   ├─ package.json
-   ├─ Largest.list.of.english.words.txt
-   ├─ scripts\word-admin.mjs       # Мини UI для управления unified БД
-   └─ src\
-      ├─ database\moderation-db.json # Единая словарная БД (entries + whitelist + slangMap)
+</div>
+
+---
+
+<a name="english"></a>
+
+## 🇬🇧 English
+
+### Overview
+
+A two-layer hybrid moderation pipeline that protects Telegram chats from profanity, obfuscations, scam, and toxic content:
+
+| Layer | Technology | Purpose |
+|-------|-----------|---------|
+| **L1 — Lexical** | Rust · Aho-Corasick · Damerau-Levenshtein | Lightning-fast detection of profanity and obfuscations |
+| **L2 — Semantic** | ONNX · Qdrant | Vector-based detection of scam and complex edge cases |
+
+---
+
+### Architecture
+
+```
+Telegram Message
+       │
+       ▼
+  ┌─────────────────────────────────────────┐
+  │         ModerationEngine                │
+  │                                         │
+  │  1. SimdPreprocessor                    │
+  │     NFKC · leet-fold · candidates       │
+  │                                         │
+  │  2. Early Skip (js_parity)              │
+  │     whitelist · clean-lexicon (100k+)   │
+  │                                         │
+  │  3. L1 — Lexical                        │
+  │     Aho-Corasick DFA · fuzzy match      │
+  │     decision layer · acronym guards     │
+  │                                         │
+  │  4. L2 — Semantic (if L1 inconclusive)  │
+  │     ONNX embedding · Qdrant ANN search  │
+  │     profanity candidates · scam scan    │
+  └─────────────────────────────────────────┘
+       │
+       ▼
+  CLEAN ✅  or  VIOLATION 🚫
+  (bot warns + deletes message)
 ```
 
-Неиспользуемые учебные/артефактные файлы вынесены в `not used\`.
-Legacy JS-рантайм и вспомогательные JS-скрипты также вынесены в `not used\profanity-destroyer-js\`.
+---
+
+### Repository Map
+
+```
+gemini/
+├── Cargo.toml                        # Rust workspace
+├── rust_dict.txt                     # L1 flat dictionary
+│
+├── vector_db_engine/                 # Core hybrid engine (Rust library)
+│   ├── src/
+│   │   ├── lib.rs                    # L1/L2 orchestrator
+│   │   ├── dfa_fast_path.rs          # Aho-Corasick + fuzzy
+│   │   ├── simd_preprocessor.rs      # Normalization & obfuscation candidates
+│   │   ├── js_parity.rs              # Decision layer + gates
+│   │   ├── l2_semantic.rs            # ONNX embedding + Qdrant
+│   │   ├── disruptor.rs              # Lock-free ring buffer
+│   │   └── embedded_js/              # Compile-time fallback JSONs
+│   └── models/
+│       ├── model_quantized.onnx
+│       └── tokenizer.json
+│
+├── telegram_bot/                     # Telegram runtime (Rust binary)
+│   └── src/main.rs                   # Polling loop + /train command
+│
+├── profanity-destroyer/              # Dictionary management (JS)
+│   ├── src/database/moderation-db.json  # Unified word DB
+│   ├── scripts/word-admin.mjs        # Admin UI
+│   └── Largest.list.of.english.words.txt
+│
+├── scripts/python/
+│   ├── build_rust_dictionary.py      # Builds rust_dict.txt
+│   ├── mine_moderation_data.py       # Mines toxic data from HF datasets
+│   ├── seed_qdrant_from_hf.py        # Seeds Qdrant from HuggingFace
+│   ├── seed_qdrant_from_local_datasets.py
+│   ├── seed_qdrant_nitro_examples.py
+│   └── seed_qdrant_from_mined_toxicity.py
+│
+├── dashboard/                        # Django web dashboard
+│   ├── channels_app/                 # Channel models & views
+│   └── templates/dashboard/
+│
+└── not used/                         # Archived / legacy artifacts
+```
 
 ---
 
-## 2) Архитектура обработки сообщения (Rust runtime)
+### Quick Start
 
-Поток (`telegram_bot/src/main.rs` -> `ModerationEngine::check_payload`):
+#### Prerequisites
 
-1. Бот получает `msg.text()`.
-2. Текст уходит в `vector_db_engine::ModerationEngine`.
-3. `SimdBuffer` делает нормализацию + извлекает кандидаты (`strict/collapsed/merged`).
-4. **Ранний skip (`js_parity.should_skip_lexical_stage`)**:
-   - если токен в `whitelist` -> сразу clean,
-   - если токен в топ-частотном clean-лексиконе (100k + bloom) и не обфусцирован -> сразу clean.
-5. L1 lexical:
-   - `dfa_fast_path`: raw Aho-Corasick + fuzzy,
-   - `js_parity.analyze`: decision layer, short acronyms, guards, heuristic.
-6. Если L1 не дал финал:
-   - `scan_profanity_candidates` (семантическая проверка обфусцированных profanity-кандидатов),
-   - затем `scan_semantic` (общий векторный fallback при выполнении условий).
-7. Если violation=true, бот удаляет сообщение и шлет предупреждение.
+- **Rust** — `stable-x86_64-pc-windows-msvc`
+- **Visual Studio Build Tools** with C++ (requires `link.exe`)
+- **Python** 3.10+
+- **Node.js** 18+
+- **Docker** (for Qdrant)
 
-Команда `/train <text>` добавляет новый вектор в Qdrant (`live_trained_profanity`) в рантайме.
+#### 1 — Install dependencies
 
----
+```powershell
+npm --prefix profanity-destroyer install
+```
 
-## 3) Компоненты и роли
+#### 2 — Configure environment
 
-| Компонент | Язык | Роль |
-|---|---|---|
-| `telegram_bot` | Rust | Telegram polling runtime, вызовы движка, `/train` |
-| `vector_db_engine` | Rust | Основной hybrid-движок L1 + L2 |
-| `profanity-destroyer` | JS + Rust NAPI | Источник словарей, JS-референс, админка слов |
-| `scripts/python/build_rust_dictionary.py` | Python | Сборка `rust_dict.txt` |
-| `scripts/python/seed_qdrant_*.py` | Python | Наполнение Qdrant данными для L2 |
-
----
-
-## 4) Источники слов и приоритеты
-
-### 4.1 Blacklist для `rust_dict.txt`
-`scripts/python/build_rust_dictionary.py` объединяет:
-
-1. `profanity-destroyer/src/database/moderation-db.json` (`entries[*].match` и `entries[*].word`)
-2. `profanity-destroyer/node_modules/naughty-words/en.json`
-3. `vector_db_engine/src/embedded_js/merged-external.json` (legacy расширения словаря)
-
-Результат: `rust_dict.txt` (перезаписывается при rebuild).
-
-### 4.2 Whitelist
-Whitelist хранится в unified базе:
-
-- `profanity-destroyer/src/database/moderation-db.json` -> поле `whitelist`
-
-Whitelist **не должен** попадать в `rust_dict.txt` — он учитывается отдельной логикой skip/исключений в движке.
-
-### 4.3 Дополнительные источники `js_parity`
-`vector_db_engine/src/js_parity.rs` грузит:
-
-- embedded fallback `moderation-db.json` (compile-time include),
-- runtime `profanity-destroyer/src/database/moderation-db.json` (если найден),
-- `profanity-destroyer/Largest.list.of.english.words.txt` (top clean words + bloom),
-- decision model (`src/embedded_js/decision-model.json` + runtime override в `profanity-destroyer/src/config/decision-model.json`).
-
----
-
-## 5) Конфигурация (env и runtime)
-
-### 5.1 Telegram runtime
-
-| Переменная | Где используется | Значение по умолчанию / смысл |
-|---|---|---|
-| `BOT_TOKEN` | `telegram_bot/src/main.rs` | обязателен |
-| `DETECTOR_MODE` | `telegram_bot/src/main.rs` | `balanced` (сейчас в Rust-боте только логируется) |
-| `OMEGA_RUST_DICT_PATH` | `telegram_bot/src/main.rs` | явный путь к `rust_dict.txt` |
-
-### 5.2 Engine / Parity / Semantic
-
-| Переменная | Где | Смысл |
-|---|---|---|
-| `OMEGA_PROFANITY_VECTOR_SEED_LIMIT` | `vector_db_engine/src/lib.rs` | сколько profanity-термов загружается в Qdrant (0..25000, default 2000) |
-| `OMEGA_PROFANITY_VECTOR_THRESHOLD` | `vector_db_engine/src/l2_semantic.rs` | порог семантики для profanity-кандидатов (0.5..0.99, default 0.80) |
-| `OMEGA_MODEL_PATH` | `telegram_bot/src/main.rs` | явный путь к `model_quantized.onnx` |
-| `OMEGA_TOKENIZER_PATH` | `telegram_bot/src/main.rs` | явный путь к `tokenizer.json` |
-| `OMEGA_CONTEXT_PHRASE_PATH` | `vector_db_engine/src/js_parity.rs` | путь к `contextual_whitelist_phrases.txt` (контекстные фразы до L2) |
-| `OMEGA_PROFANITY_ROOT` | `vector_db_engine/src/js_parity.rs` | явный путь к `profanity-destroyer` |
-| `OMEGA_EXCLUDE_LEGACY_EXTERNAL` | `vector_db_engine/src/js_parity.rs` | `1` отключает legacy external словарь (`merged-external`) |
-| `OMEGA_TRACE_WORD_PIPELINE` | `vector_db_engine/src/lib.rs` | трассировка каждого сообщения и этапов слова в консоль (default: включено, `0/false/off/no` отключают) |
-
-### 5.3 Word Admin UI
-
-| Переменная | Где | Смысл |
-|---|---|---|
-| `WORD_ADMIN_PORT` | `profanity-destroyer/scripts/word-admin.mjs` | порт UI (default `3210`) |
-
----
-
-## 6) Установка и запуск (Windows, локально)
-
-### 6.1 Требования
-
-1. Rust toolchain (`stable-x86_64-pc-windows-msvc`).
-2. Visual Studio Build Tools с C++ (нужен `link.exe`).
-3. Python 3.10+.
-4. Node.js 18+.
-5. Qdrant (локально или Docker).
-
-### 6.2 Подготовка
-
-1. В корне проекта создать/обновить `.env`:
+Create `.env` in the repo root:
 
 ```env
 BOT_TOKEN=YOUR_TELEGRAM_BOT_TOKEN
 DETECTOR_MODE=balanced
 ```
 
-2. Установить JS зависимости:
-
-```powershell
-npm --prefix profanity-destroyer install
-```
-
-3. Сгенерировать словарь:
+#### 3 — Build the dictionary
 
 ```powershell
 python scripts\python\build_rust_dictionary.py
 ```
 
-### 6.3 Поднять Qdrant
-
-Пример через Docker:
+#### 4 — Start Qdrant
 
 ```powershell
 docker run -p 6333:6333 -p 6334:6334 qdrant/qdrant
 ```
 
-> Важно: ingestion-скрипты по умолчанию используют `6333`, а Rust-бот сейчас создает движок с URL `http://localhost:6334`.
-> Держи порты согласованными (либо пробрасывай оба, либо унифицируй URL в коде).
+> ⚠️ **Port note:** Python seed scripts default to `6333`; the Rust bot connects to `6334`. Keep both ports exposed, or unify the URL in the source.
 
-### 6.4 (Опционально) Наполнить векторную базу
+#### 5 — (Optional) Seed the vector database
 
 ```powershell
 python scripts\python\mine_moderation_data.py --max-contexts 100000 --max-per-dataset 300000 --min-generic-toxic-score 0.5
@@ -203,79 +159,67 @@ python scripts\python\seed_qdrant_nitro_examples.py
 python scripts\python\seed_qdrant_from_mined_toxicity.py --input .\datasets\mined_toxicity.json
 ```
 
-`mine_moderation_data.py` теперь проходит по нескольким HF источникам (Jigsaw mirrors, RealToxicityPrompts, Civil Comments, Davidson/SetFit, tweets-hate-speech-detection, Berkeley measuring-hate-speech, tweet_eval hate/offensive, ParaDetox) и берет токсичные контексты из каждого до `--max-per-dataset`.
-Дополнительно скрипт сохраняет `datasets/contextual_whitelist_phrases.txt` — фразы из "чистых" слов (whitelist), которые могут быть токсичными только в контексте; движок проверяет их **до** L2-векторов.
-
-Для контрастного обучения L2 можно дополнительно собирать triplets из LMSYS:
+For contrastive triplet mining (requires HF access token):
 
 ```powershell
 python scripts\python\mine_moderation_data.py --enable-lmsys-triplets --lmsys-max-triplets 50000 --triplets-output .\datasets\mined_toxic_triplets.jsonl
 ```
 
-`lmsys/lmsys-chat-1m` — gated dataset, поэтому нужен доступ на Hugging Face (и обычно `HF_TOKEN`).
-
-### 6.5 Запуск бота (Rust)
+#### 6 — Run the bot
 
 ```powershell
-Set-Location <repo-root>
 cargo run -p telegram_bot
 ```
 
 ---
 
-## 7) Управление whitelist/blacklist через UI
-
-Запуск:
+### Dictionary Management UI
 
 ```powershell
 npm --prefix profanity-destroyer run word-admin
+# Open → http://127.0.0.1:3210
 ```
 
-Открыть:
-
-```text
-http://127.0.0.1:3210
-```
-
-Что делает UI:
-
-1. Добавляет/удаляет записи в `profanity-destroyer/src/database/moderation-db.json`:
-   - `whitelist`,
-   - custom blacklist entries (`source: "custom-blacklist"`).
-2. Показывает текущие слова из unified базы.
-3. Кнопка **Rebuild rust_dict.txt** запускает `scripts/python/build_rust_dictionary.py`.
+The UI allows you to:
+- Add/remove **whitelist** and custom **blacklist** entries
+- View the current unified word database
+- Trigger a **Rebuild `rust_dict.txt`** with one click
 
 ---
 
-## 8) Проверки и команды для разработки
+### Environment Variables
 
-### 8.1 Rust
+#### Telegram Bot
 
-```powershell
-Set-Location <repo-root>
-cargo fmt --all
-cargo check --workspace
-cargo test --workspace
-```
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `BOT_TOKEN` | Telegram bot token | **required** |
+| `DETECTOR_MODE` | Detection mode hint | `balanced` |
+| `OMEGA_RUST_DICT_PATH` | Explicit path to `rust_dict.txt` | auto |
+| `OMEGA_MODEL_PATH` | Explicit path to `.onnx` model | auto |
+| `OMEGA_TOKENIZER_PATH` | Explicit path to `tokenizer.json` | auto |
 
-Если ошибка `link.exe not found` — не установлен/не доступен MSVC linker.
+#### Engine & Semantics
 
-### 8.2 JS / Python
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `OMEGA_PROFANITY_VECTOR_SEED_LIMIT` | Profanity terms loaded into Qdrant | `2000` |
+| `OMEGA_PROFANITY_VECTOR_THRESHOLD` | Semantic similarity threshold | `0.80` |
+| `OMEGA_CONTEXT_PHRASE_PATH` | Path to contextual whitelist phrases | auto |
+| `OMEGA_PROFANITY_ROOT` | Explicit path to `profanity-destroyer/` | auto |
+| `OMEGA_EXCLUDE_LEGACY_EXTERNAL` | Set `1` to disable legacy external dict | off |
+| `OMEGA_TRACE_WORD_PIPELINE` | Console trace per message/token | on |
 
-```powershell
-node --check profanity-destroyer\scripts\word-admin.mjs
-python -m py_compile scripts\python\build_rust_dictionary.py
-python -m py_compile scripts\python\seed_qdrant_from_hf.py
-python -m py_compile scripts\python\seed_qdrant_from_local_datasets.py
-python -m py_compile scripts\python\seed_qdrant_nitro_examples.py
-python -m py_compile scripts\python\seed_qdrant_from_mined_toxicity.py
-```
+#### Django Dashboard
+
+| Variable | Description |
+|----------|-------------|
+| `DASHBOARD_TELEGRAM_BOT_TOKEN` | Bot token for Telegram login |
+| `DASHBOARD_TELEGRAM_BOT_USERNAME` | Bot username (without `@`) |
 
 ---
 
-## 9) Django Dashboard (Telegram-only auth)
-
-Запуск локально:
+### Django Dashboard
 
 ```powershell
 Set-Location .\dashboard
@@ -283,73 +227,306 @@ python manage.py migrate
 python manage.py runserver
 ```
 
-URLs:
+| URL | Description |
+|-----|-------------|
+| `http://127.0.0.1:8000/` | Landing page with Telegram login |
+| `http://127.0.0.1:8000/dashboard/` | Channel overview (auth required) |
+| `http://127.0.0.1:8000/admin/` | Django admin panel |
 
-- `http://127.0.0.1:8000/` — тёмная главная landing с кнопкой **Log in through Telegram**
-- `http://127.0.0.1:8000/dashboard/` — dashboard по каналам (после Telegram-верификации)
-- `http://127.0.0.1:8000/admin/` — админка Django
-
-Обязательные переменные:
-
-```env
-DASHBOARD_TELEGRAM_BOT_TOKEN=<bot token>
-# optional (if empty, dashboard tries Telegram getMe)
-DASHBOARD_TELEGRAM_BOT_USERNAME=<bot username без @>
-```
-
-Доступ к каналам:
-
-1. Пользователь логинится через Telegram.
-2. Dashboard проверяет подпись Telegram auth payload на сервере.
-3. Для каждого канала вызывается `getChatMember`; в интерфейс попадают только чаты, где статус `administrator/creator`.
-4. Изменение настроек канала разрешено только при подтвержденных админ-правах в этом чате.
+Access is scoped: only channels where the authenticated user holds `administrator` or `creator` status are shown and editable.
 
 ---
 
-## 10) Детализация модулей `vector_db_engine`
-
-| Файл | Что делает |
-|---|---|
-| `lib.rs` | orchestration L1/L2, ранний skip, vector probing |
-| `dfa_fast_path.rs` | raw Aho-Corasick + fuzzy Damerau-Levenshtein |
-| `simd_preprocessor.rs` | NFKC/leet folding, token candidates, merge strict/collapsed |
-| `js_parity.rs` | полноценная decision-плоскость: whitelist, clean lexicon, short acronyms, heuristic, context guards, vector fallback gates |
-| `l2_semantic.rs` | ONNX embedding, Qdrant search/upsert, bootstrap profanity vectors, `/train` integration |
-| `disruptor.rs` | lock-free ring buffer для handoff (в текущем main-flow не центральный) |
-| `embedded_js/decision-model.json` | встроенный fallback конфиг decision-модели |
-
----
-
-## 11) JS-проект `profanity-destroyer` (текущее использование)
-
-1. Хранение словарных данных (`src/database/moderation-db.json`, `Largest.list.of.english.words.txt`).
-2. Мини-интерфейс управления словами (`scripts/word-admin.mjs`).
-3. Исторические JS runtime/скрипты перенесены в `not used\profanity-destroyer-js\`.
-
----
-
-## 12) Известные особенности
-
-1. `scripts/python/build_rust_dictionary.py` собирает пути относительно своего расположения (без hardcoded `D:\gemini\...`).
-2. `scripts/python/seed_qdrant_from_local_datasets.py` принимает пути через `--csv/--xlsx` или env (`LOCAL_SCAM_CSV_PATH`, `LOCAL_SCAM_XLSX_PATH`) и не привязан к конкретной машине.
-3. Порт Qdrant в разных частях проекта отличается (`6333` vs `6334`).
-4. В репозитории есть несколько исторических/экспериментальных артефактов, не участвующих в основном runtime.
-
----
-
-## 13) Минимальный quick start
+### Development
 
 ```powershell
-Set-Location <repo-root>
+# Rust
+cargo fmt --all
+cargo check --workspace
+cargo test --workspace
+
+# JS
+node --check profanity-destroyer\scripts\word-admin.mjs
+
+# Python
+python -m py_compile scripts\python\build_rust_dictionary.py
+```
+
+> If you see `link.exe not found` — install **Visual Studio Build Tools** with the C++ workload.
+
+---
+
+### Runtime Training
+
+Send `/train <text>` in any moderated chat to add a new embedding directly into Qdrant's `live_trained_profanity` collection without restarting the bot.
+
+---
+
+### Known Quirks
+
+- **Qdrant port mismatch:** seed scripts use `6333`, Rust bot uses `6334` — expose both or patch the code.
+- `build_rust_dictionary.py` resolves all paths relative to its own location — safe to run from any working directory.
+- `seed_qdrant_from_local_datasets.py` accepts `--csv`/`--xlsx` flags or `LOCAL_SCAM_CSV_PATH`/`LOCAL_SCAM_XLSX_PATH` env vars — no hard-coded paths.
+- Several historical/experimental files live in `not used/` and are excluded from the main runtime.
+
+---
+
+---
+
+<a name="русский"></a>
+
+## 🇷🇺 Русский
+
+### Обзор
+
+Двухуровневый гибридный пайплайн модерации для защиты Telegram-чатов от мата, обфускаций, скама и токсичного контента:
+
+| Уровень | Технологии | Назначение |
+|---------|-----------|-----------|
+| **L1 — Лексический** | Rust · Aho-Corasick · Damerau-Levenshtein | Быстрое обнаружение мата и обфускаций |
+| **L2 — Семантический** | ONNX · Qdrant | Векторная детекция скама и сложных случаев |
+
+---
+
+### Архитектура
+
+```
+Сообщение Telegram
+       │
+       ▼
+  ┌─────────────────────────────────────────┐
+  │         ModerationEngine                │
+  │                                         │
+  │  1. SimdPreprocessor                    │
+  │     NFKC · leet-fold · кандидаты        │
+  │                                         │
+  │  2. Ранний skip (js_parity)             │
+  │     whitelist · clean-лексикон (100k+)  │
+  │                                         │
+  │  3. L1 — Лексический                   │
+  │     Aho-Corasick DFA · fuzzy match      │
+  │     decision layer · acronym guards     │
+  │                                         │
+  │  4. L2 — Семантический (если L1 = ?)   │
+  │     ONNX embedding · Qdrant ANN search  │
+  │     profanity кандидаты · скан скама    │
+  └─────────────────────────────────────────┘
+       │
+       ▼
+  CLEAN ✅  или  НАРУШЕНИЕ 🚫
+  (бот предупреждает + удаляет сообщение)
+```
+
+---
+
+### Карта репозитория
+
+```
+gemini/
+├── Cargo.toml                        # Rust workspace
+├── rust_dict.txt                     # Плоский словарь L1
+│
+├── vector_db_engine/                 # Основной гибридный движок (Rust library)
+│   ├── src/
+│   │   ├── lib.rs                    # Оркестратор L1/L2
+│   │   ├── dfa_fast_path.rs          # Aho-Corasick + fuzzy
+│   │   ├── simd_preprocessor.rs      # Нормализация и кандидаты обфускаций
+│   │   ├── js_parity.rs              # Decision layer + gates
+│   │   ├── l2_semantic.rs            # ONNX embedding + Qdrant
+│   │   ├── disruptor.rs              # Lock-free ring buffer
+│   │   └── embedded_js/              # Compile-time fallback JSON
+│   └── models/
+│       ├── model_quantized.onnx
+│       └── tokenizer.json
+│
+├── telegram_bot/                     # Telegram runtime (Rust binary)
+│   └── src/main.rs                   # Polling loop + команда /train
+│
+├── profanity-destroyer/              # Управление словарями (JS)
+│   ├── src/database/moderation-db.json  # Единая словарная БД
+│   ├── scripts/word-admin.mjs        # Мини-UI управления словами
+│   └── Largest.list.of.english.words.txt
+│
+├── scripts/python/
+│   ├── build_rust_dictionary.py      # Сборка rust_dict.txt
+│   ├── mine_moderation_data.py       # Майнинг токсичных данных из HF
+│   ├── seed_qdrant_from_hf.py        # Наполнение Qdrant из HuggingFace
+│   ├── seed_qdrant_from_local_datasets.py
+│   ├── seed_qdrant_nitro_examples.py
+│   └── seed_qdrant_from_mined_toxicity.py
+│
+├── dashboard/                        # Django веб-дашборд
+│   ├── channels_app/                 # Модели и вьюхи каналов
+│   └── templates/dashboard/
+│
+└── not used/                         # Архивные / legacy артефакты
+```
+
+---
+
+### Быстрый старт
+
+#### Требования
+
+- **Rust** — `stable-x86_64-pc-windows-msvc`
+- **Visual Studio Build Tools** с C++ (нужен `link.exe`)
+- **Python** 3.10+
+- **Node.js** 18+
+- **Docker** (для Qdrant)
+
+#### 1 — Установить зависимости
+
+```powershell
 npm --prefix profanity-destroyer install
+```
+
+#### 2 — Настроить окружение
+
+Создать `.env` в корне репозитория:
+
+```env
+BOT_TOKEN=YOUR_TELEGRAM_BOT_TOKEN
+DETECTOR_MODE=balanced
+```
+
+#### 3 — Собрать словарь
+
+```powershell
 python scripts\python\build_rust_dictionary.py
+```
+
+#### 4 — Запустить Qdrant
+
+```powershell
 docker run -p 6333:6333 -p 6334:6334 qdrant/qdrant
+```
+
+> ⚠️ **Важно:** Python-скрипты используют порт `6333`, Rust-бот подключается к `6334`. Пробрасывай оба порта, либо унифицируй URL в коде.
+
+#### 5 — (Опционально) Наполнить векторную базу
+
+```powershell
+python scripts\python\mine_moderation_data.py --max-contexts 100000 --max-per-dataset 300000 --min-generic-toxic-score 0.5
+python scripts\python\seed_qdrant_from_hf.py
+python scripts\python\seed_qdrant_from_local_datasets.py --csv .\datasets\discord-phishing-scam-detection.csv --xlsx .\datasets\testing.xlsx
+python scripts\python\seed_qdrant_nitro_examples.py
+python scripts\python\seed_qdrant_from_mined_toxicity.py --input .\datasets\mined_toxicity.json
+```
+
+Для контрастного обучения (нужен HF-токен, датасет gated):
+
+```powershell
+python scripts\python\mine_moderation_data.py --enable-lmsys-triplets --lmsys-max-triplets 50000 --triplets-output .\datasets\mined_toxic_triplets.jsonl
+```
+
+#### 6 — Запустить бота
+
+```powershell
 cargo run -p telegram_bot
 ```
 
-Для управления словарем:
+---
+
+### UI управления словарём
 
 ```powershell
 npm --prefix profanity-destroyer run word-admin
+# Открыть → http://127.0.0.1:3210
 ```
 
+Что умеет UI:
+- Добавлять / удалять записи в **whitelist** и кастомный **blacklist**
+- Просматривать текущую единую словарную базу
+- Запускать **Rebuild `rust_dict.txt`** одной кнопкой
+
+---
+
+### Переменные окружения
+
+#### Telegram Bot
+
+| Переменная | Описание | По умолчанию |
+|-----------|---------|-------------|
+| `BOT_TOKEN` | Токен Telegram-бота | **обязателен** |
+| `DETECTOR_MODE` | Режим детекции | `balanced` |
+| `OMEGA_RUST_DICT_PATH` | Явный путь к `rust_dict.txt` | авто |
+| `OMEGA_MODEL_PATH` | Явный путь к `.onnx` модели | авто |
+| `OMEGA_TOKENIZER_PATH` | Явный путь к `tokenizer.json` | авто |
+
+#### Движок и семантика
+
+| Переменная | Описание | По умолчанию |
+|-----------|---------|-------------|
+| `OMEGA_PROFANITY_VECTOR_SEED_LIMIT` | Кол-во profanity-термов в Qdrant | `2000` |
+| `OMEGA_PROFANITY_VECTOR_THRESHOLD` | Порог семантического сходства | `0.80` |
+| `OMEGA_CONTEXT_PHRASE_PATH` | Путь к контекстным whitelist-фразам | авто |
+| `OMEGA_PROFANITY_ROOT` | Явный путь к `profanity-destroyer/` | авто |
+| `OMEGA_EXCLUDE_LEGACY_EXTERNAL` | `1` — отключает legacy external словарь | выкл |
+| `OMEGA_TRACE_WORD_PIPELINE` | Трассировка пайплайна в консоль | вкл |
+
+#### Django Dashboard
+
+| Переменная | Описание |
+|-----------|---------|
+| `DASHBOARD_TELEGRAM_BOT_TOKEN` | Токен бота для Telegram-логина |
+| `DASHBOARD_TELEGRAM_BOT_USERNAME` | Юзернейм бота (без `@`) |
+
+---
+
+### Django Dashboard
+
+```powershell
+Set-Location .\dashboard
+python manage.py migrate
+python manage.py runserver
+```
+
+| URL | Описание |
+|-----|---------|
+| `http://127.0.0.1:8000/` | Лендинг с кнопкой входа через Telegram |
+| `http://127.0.0.1:8000/dashboard/` | Обзор каналов (нужна авторизация) |
+| `http://127.0.0.1:8000/admin/` | Панель администратора Django |
+
+Доступ к каналам — только те чаты, где пользователь является `administrator` или `creator`.
+
+---
+
+### Разработка
+
+```powershell
+# Rust
+cargo fmt --all
+cargo check --workspace
+cargo test --workspace
+
+# JS
+node --check profanity-destroyer\scripts\word-admin.mjs
+
+# Python
+python -m py_compile scripts\python\build_rust_dictionary.py
+```
+
+> Ошибка `link.exe not found` — установи **Visual Studio Build Tools** с компонентом C++.
+
+---
+
+### Обучение в рантайме
+
+Отправь `/train <текст>` в любом модерируемом чате — новый вектор добавится в коллекцию `live_trained_profanity` в Qdrant без перезапуска бота.
+
+---
+
+### Известные особенности
+
+- **Разные порты Qdrant:** seed-скрипты — `6333`, Rust-бот — `6334`. Пробрасывай оба или унифицируй URL.
+- `build_rust_dictionary.py` разрешает пути относительно своего расположения — безопасно запускать из любой директории.
+- `seed_qdrant_from_local_datasets.py` принимает `--csv`/`--xlsx` или `LOCAL_SCAM_CSV_PATH`/`LOCAL_SCAM_XLSX_PATH` — без привязки к конкретной машине.
+- Исторические и экспериментальные файлы вынесены в `not used/` и не участвуют в основном runtime.
+
+---
+
+<div align="center">
+
+Made with 🦀 Rust · 🐍 Python · 🟨 JavaScript
+
+</div>
