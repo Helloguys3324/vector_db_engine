@@ -1,0 +1,56 @@
+{% extends "dashboard/base.html" %}
+
+{% block page_title %}{{ channel.name }}{% endblock %}
+
+{% block content %}
+<section class="cards-grid">
+    <article class="stat-card">
+        <p>Status</p>
+        <h2>{{ channel.get_bot_status_display }}</h2>
+    </article>
+    <article class="stat-card">
+        <p>Moderation Mode</p>
+        <h2>{{ channel.get_moderation_mode_display }}</h2>
+    </article>
+    <article class="stat-card">
+        <p>Scanned</p>
+        <h2>{{ channel.messages_scanned }}</h2>
+    </article>
+    <article class="stat-card">
+        <p>Blocked Rate</p>
+        <h2>{{ channel.block_rate|floatformat:2 }}%</h2>
+    </article>
+</section>
+
+<section class="panel mt-4">
+    <div class="panel-head">
+        <h3>Edit Settings</h3>
+        <a href="{% url 'channels:home' %}" class="btn btn-outline-light btn-sm">Back</a>
+    </div>
+    <form method="post" class="row g-3">
+        {% csrf_token %}
+        {% for field in form %}
+            {% if field.field.widget.input_type == 'checkbox' %}
+            <div class="col-12">
+                <div class="form-check mt-2">
+                    {{ field }}
+                    <label class="form-check-label">{{ field.label }}</label>
+                </div>
+            </div>
+            {% else %}
+            <div class="col-12 col-lg-6">
+                <label class="form-label">{{ field.label }}</label>
+                {{ field }}
+                {% if field.errors %}
+                    <div class="text-danger small mt-1">{{ field.errors|striptags }}</div>
+                {% endif %}
+            </div>
+            {% endif %}
+        {% endfor %}
+        <div class="col-12 d-flex gap-2 mt-2">
+            <button type="submit" class="btn btn-primary">Save settings</button>
+            <a href="{% url 'channels:home' %}" class="btn btn-outline-light">Cancel</a>
+        </div>
+    </form>
+</section>
+{% endblock %}

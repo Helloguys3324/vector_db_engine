@@ -1,0 +1,36 @@
+{% extends "dashboard/base.html" %}
+
+{% block page_title %}Add Channel{% endblock %}
+
+{% block content %}
+<section class="panel">
+    <div class="panel-head">
+        <h3>New managed channel</h3>
+    </div>
+    <p class="text-secondary small mb-3">Channel will be added only if your Telegram account is admin in this chat.</p>
+    <form method="post" class="row g-3">
+        {% csrf_token %}
+        {% for field in form %}
+            {% if field.field.widget.input_type == 'checkbox' %}
+            <div class="col-12">
+                <div class="form-check mt-2">
+                    {{ field }}
+                    <label class="form-check-label">{{ field.label }}</label>
+                </div>
+            {% else %}
+            <div class="col-12 col-lg-6">
+                <label class="form-label">{{ field.label }}</label>
+                {{ field }}
+                {% if field.errors %}
+                    <div class="text-danger small mt-1">{{ field.errors|striptags }}</div>
+                {% endif %}
+            </div>
+            {% endif %}
+        {% endfor %}
+        <div class="col-12 d-flex gap-2 mt-2">
+            <button type="submit" class="btn btn-primary">Create channel</button>
+            <a href="{% url 'channels:home' %}" class="btn btn-outline-light">Cancel</a>
+        </div>
+    </form>
+</section>
+{% endblock %}

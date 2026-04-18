@@ -21,6 +21,12 @@ D:\gemini
 │     ├─ seed_qdrant_from_local_datasets.py# Дозаливка локальных датасетов в Qdrant
 │     ├─ seed_qdrant_nitro_examples.py     # Дозаливка Nitro scam-паттернов
 │     └─ seed_qdrant_from_mined_toxicity.py# Загрузка mined_toxicity в live_trained_profanity
+├─ dashboard\                      # Django dashboard (каналы + админка)
+│  ├─ manage.py
+│  ├─ config\                      # Django project config
+│  ├─ channels_app\                # Модели/вьюхи каналов модерации
+│  ├─ templates\dashboard\         # UI-шаблоны dashboard
+│  └─ static\dashboard\            # Стили dashboard
 ├─ not used\                       # Архив неучаствующих в пайплайне файлов
 ├─ vector_db_engine\               # Rust-библиотека движка модерации
 │  ├─ Cargo.toml
@@ -267,7 +273,40 @@ python -m py_compile scripts\python\seed_qdrant_from_mined_toxicity.py
 
 ---
 
-## 9) Детализация модулей `vector_db_engine`
+## 9) Django Dashboard (Telegram-only auth)
+
+Запуск локально:
+
+```powershell
+Set-Location .\dashboard
+python manage.py migrate
+python manage.py runserver
+```
+
+URLs:
+
+- `http://127.0.0.1:8000/` — тёмная главная landing с кнопкой **Log in through Telegram**
+- `http://127.0.0.1:8000/dashboard/` — dashboard по каналам (после Telegram-верификации)
+- `http://127.0.0.1:8000/admin/` — админка Django
+
+Обязательные переменные:
+
+```env
+DASHBOARD_TELEGRAM_BOT_TOKEN=<bot token>
+# optional (if empty, dashboard tries Telegram getMe)
+DASHBOARD_TELEGRAM_BOT_USERNAME=<bot username без @>
+```
+
+Доступ к каналам:
+
+1. Пользователь логинится через Telegram.
+2. Dashboard проверяет подпись Telegram auth payload на сервере.
+3. Для каждого канала вызывается `getChatMember`; в интерфейс попадают только чаты, где статус `administrator/creator`.
+4. Изменение настроек канала разрешено только при подтвержденных админ-правах в этом чате.
+
+---
+
+## 10) Детализация модулей `vector_db_engine`
 
 | Файл | Что делает |
 |---|---|
@@ -281,7 +320,7 @@ python -m py_compile scripts\python\seed_qdrant_from_mined_toxicity.py
 
 ---
 
-## 10) JS-проект `profanity-destroyer` (текущее использование)
+## 11) JS-проект `profanity-destroyer` (текущее использование)
 
 1. Хранение словарных данных (`src/database/moderation-db.json`, `Largest.list.of.english.words.txt`).
 2. Мини-интерфейс управления словами (`scripts/word-admin.mjs`).
@@ -289,7 +328,7 @@ python -m py_compile scripts\python\seed_qdrant_from_mined_toxicity.py
 
 ---
 
-## 11) Известные особенности
+## 12) Известные особенности
 
 1. `scripts/python/build_rust_dictionary.py` собирает пути относительно своего расположения (без hardcoded `D:\gemini\...`).
 2. `scripts/python/seed_qdrant_from_local_datasets.py` принимает пути через `--csv/--xlsx` или env (`LOCAL_SCAM_CSV_PATH`, `LOCAL_SCAM_XLSX_PATH`) и не привязан к конкретной машине.
@@ -298,7 +337,7 @@ python -m py_compile scripts\python\seed_qdrant_from_mined_toxicity.py
 
 ---
 
-## 12) Минимальный quick start
+## 13) Минимальный quick start
 
 ```powershell
 Set-Location <repo-root>

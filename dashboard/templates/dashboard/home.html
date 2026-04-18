@@ -1,0 +1,71 @@
+{% extends "dashboard/base.html" %}
+
+{% block page_title %}Channel Dashboard{% endblock %}
+
+{% block content %}
+<section class="cards-grid">
+    <article class="stat-card">
+        <p>Total Channels</p>
+        <h2>{{ total_channels }}</h2>
+    </article>
+    <article class="stat-card">
+        <p>Messages Scanned</p>
+        <h2>{{ total_scanned }}</h2>
+    </article>
+    <article class="stat-card">
+        <p>Blocked Messages</p>
+        <h2>{{ total_blocked }}</h2>
+    </article>
+    <article class="stat-card">
+        <p>Block Rate</p>
+        <h2>{{ blocked_percent|floatformat:2 }}%</h2>
+    </article>
+</section>
+
+<section class="panel mt-4">
+    <div class="panel-head">
+        <h3>Channels</h3>
+        <a href="{% url 'channels:channel-create' %}" class="btn btn-primary btn-sm">Add channel</a>
+    </div>
+    <p class="text-secondary small mb-3">Only Telegram chats where your account is administrator are shown here.</p>
+    {% if channels %}
+    <div class="table-responsive">
+        <table class="table table-dark table-hover align-middle mb-0">
+            <thead>
+                <tr>
+                    <th>Channel</th>
+                    <th>Platform</th>
+                    <th>Mode</th>
+                    <th>Status</th>
+                    <th>Scanned</th>
+                    <th>Blocked</th>
+                    <th></th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for channel in channels %}
+                <tr>
+                    <td>
+                        <strong>{{ channel.name }}</strong><br>
+                        <small class="text-secondary">{{ channel.external_id }}</small>
+                    </td>
+                    <td>{{ channel.get_platform_display }}</td>
+                    <td>{{ channel.get_moderation_mode_display }}</td>
+                    <td><span class="status-chip status-{{ channel.bot_status }}">{{ channel.get_bot_status_display }}</span></td>
+                    <td>{{ channel.messages_scanned }}</td>
+                    <td>{{ channel.blocked_messages }}</td>
+                    <td><a href="{% url 'channels:channel-detail' channel.pk %}" class="btn btn-outline-light btn-sm">View</a></td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+    <div class="empty-state">
+        <i class="bi bi-stars"></i>
+        <h4>No channels yet</h4>
+        <p>Add your first channel and configure moderation profile.</p>
+    </div>
+    {% endif %}
+</section>
+{% endblock %}
