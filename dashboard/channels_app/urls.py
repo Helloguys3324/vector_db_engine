@@ -12,4 +12,7 @@ urlpatterns = [
     path('dashboard/', views.dashboard_home, name='home'),
     path('channels/new/', views.channel_create, name='channel-create'),
     path('channels/<int:pk>/', views.channel_detail, name='channel-detail'),
+    path('analytics/', views.analytics_page, name='analytics'),
+    path('offenders/', views.offenders_page, name='offenders'),
+    path('connect/', views.connect_page, name='connect'),
 ]

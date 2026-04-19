@@ -1,71 +1,166 @@
 {% extends "dashboard/base.html" %}
 
-{% block page_title %}Channel Dashboard{% endblock %}
+{% block page_title %}Обзор{% endblock %}
+{% block page_heading %}Обзор каналов{% endblock %}
+{% block page_breadcrumb %}NexGuard / Обзор{% endblock %}
+{% block nav_home %}active{% endblock %}
+
+{% block top_actions %}
+<a href="{% url 'channels:connect' %}" class="btn btn-primary">
+  <i class="bi bi-plug"></i> Подключить бота
+</a>
+<a href="{% url 'channels:channel-create' %}" class="btn btn-secondary">
+  <i class="bi bi-plus"></i> Добавить канал
+</a>
+{% endblock %}
 
 {% block content %}
-<section class="cards-grid">
-    <article class="stat-card">
-        <p>Total Channels</p>
-        <h2>{{ total_channels }}</h2>
-    </article>
-    <article class="stat-card">
-        <p>Messages Scanned</p>
-        <h2>{{ total_scanned }}</h2>
-    </article>
-    <article class="stat-card">
-        <p>Blocked Messages</p>
-        <h2>{{ total_blocked }}</h2>
-    </article>
-    <article class="stat-card">
-        <p>Block Rate</p>
-        <h2>{{ blocked_percent|floatformat:2 }}%</h2>
-    </article>
-</section>
 
-<section class="panel mt-4">
-    <div class="panel-head">
-        <h3>Channels</h3>
-        <a href="{% url 'channels:channel-create' %}" class="btn btn-primary btn-sm">Add channel</a>
+<!-- Stat cards -->
+<div class="cards-grid">
+  <article class="stat-card">
+    <div class="stat-card-header">
+      <span class="stat-card-label">Каналов подключено</span>
+      <div class="stat-card-icon blue"><i class="bi bi-broadcast"></i></div>
     </div>
-    <p class="text-secondary small mb-3">Only Telegram chats where your account is administrator are shown here.</p>
-    {% if channels %}
-    <div class="table-responsive">
-        <table class="table table-dark table-hover align-middle mb-0">
-            <thead>
-                <tr>
-                    <th>Channel</th>
-                    <th>Platform</th>
-                    <th>Mode</th>
-                    <th>Status</th>
-                    <th>Scanned</th>
-                    <th>Blocked</th>
-                    <th></th>
-                </tr>
-            </thead>
-            <tbody>
-                {% for channel in channels %}
-                <tr>
-                    <td>
-                        <strong>{{ channel.name }}</strong><br>
-                        <small class="text-secondary">{{ channel.external_id }}</small>
-                    </td>
-                    <td>{{ channel.get_platform_display }}</td>
-                    <td>{{ channel.get_moderation_mode_display }}</td>
-                    <td><span class="status-chip status-{{ channel.bot_status }}">{{ channel.get_bot_status_display }}</span></td>
-                    <td>{{ channel.messages_scanned }}</td>
-                    <td>{{ channel.blocked_messages }}</td>
-                    <td><a href="{% url 'channels:channel-detail' channel.pk %}" class="btn btn-outline-light btn-sm">View</a></td>
-                </tr>
-                {% endfor %}
-            </tbody>
-        </table>
+    <div class="stat-card-value" data-target="{{ total_channels }}">{{ total_channels }}</div>
+    <div class="stat-card-delta neutral"><i class="bi bi-dash"></i> Telegram + Discord</div>
+  </article>
+
+  <article class="stat-card">
+    <div class="stat-card-header">
+      <span class="stat-card-label">Сообщений проверено</span>
+      <div class="stat-card-icon green"><i class="bi bi-chat-left-text"></i></div>
     </div>
-    {% else %}
-    <div class="empty-state">
-        <i class="bi bi-stars"></i>
-        <h4>No channels yet</h4>
-        <p>Add your first channel and configure moderation profile.</p>
+    <div class="stat-card-value" data-target="{{ total_scanned }}">{{ total_scanned }}</div>
+    <div class="stat-card-delta neutral"><i class="bi bi-activity"></i> За всё время</div>
+  </article>
+
+  <article class="stat-card">
+    <div class="stat-card-header">
+      <span class="stat-card-label">Заблокировано</span>
+      <div class="stat-card-icon red"><i class="bi bi-shield-x"></i></div>
     </div>
-    {% endif %}
-</section>
+    <div class="stat-card-value" data-target="{{ total_blocked }}">{{ total_blocked }}</div>
+    <div class="stat-card-delta {% if blocked_percent > 5 %}down{% else %}up{% endif %}">
+      <i class="bi {% if blocked_percent > 5 %}bi-arrow-up{% else %}bi-arrow-down{% endif %}"></i>
+      {{ blocked_percent|floatformat:1 }}% от всех
+    </div>
+  </article>
+
+  <article class="stat-card">
+    <div class="stat-card-header">
+      <span class="stat-card-label">Процент блокировок</span>
+      <div class="stat-card-icon amber"><i class="bi bi-percent"></i></div>
+    </div>
+    <div class="stat-card-value">{{ blocked_percent|floatformat:1 }}%</div>
+    <div class="progress-bar-wrap mt-2" style="min-width:100%;" title="{{ blocked_percent|floatformat:1 }}%">
+      <div class="progress-bar-fill {% if blocked_percent > 10 %}danger{% endif %}"
+           style="width: {% if blocked_percent > 100 %}100{% else %}{{ blocked_percent|floatformat:0 }}{% endif %}%"></div>
+    </div>
+  </article>
+</div>
+
+<!-- Channels table -->
+<div class="panel" style="animation-delay:0.2s;">
+  <div class="panel-head">
+    <h3><i class="bi bi-collection" style="margin-right:8px; color:var(--accent);"></i>Ваши каналы</h3>
+    <a href="{% url 'channels:channel-create' %}" class="btn btn-primary btn-sm">
+      <i class="bi bi-plus"></i> Добавить
+    </a>
+  </div>
+
+  <p class="text-soft text-sm" style="padding:0 20px 12px;">
+    Отображаются только чаты, в которых ваш аккаунт является администратором.
+  </p>
+
+  {% if channels %}
+  <div class="nx-table-wrap">
+    <table class="nx-table">
+      <thead>
+        <tr>
+          <th>Канал</th>
+          <th>Платформа</th>
+          <th>Режим</th>
+          <th>Статус бота</th>
+          <th>Проверено</th>
+          <th>Заблокировано</th>
+          <th>% блокировок</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for channel in channels %}
+        <tr>
+          <td>
+            <div style="font-weight:600;">{{ channel.name }}</div>
+            <div class="text-xs mono text-muted">{{ channel.external_id }}</div>
+          </td>
+          <td>
+            <span class="platform-badge {{ channel.platform }}">
+              <i class="bi bi-{{ channel.platform }}"></i>
+              {{ channel.get_platform_display }}
+            </span>
+          </td>
+          <td>
+            <span class="mode-badge mode-{{ channel.moderation_mode }}">
+              {{ channel.get_moderation_mode_display }}
+            </span>
+          </td>
+          <td>
+            <span class="status-chip status-{{ channel.bot_status }}">
+              {{ channel.get_bot_status_display }}
+            </span>
+          </td>
+          <td class="text-bold">{{ channel.messages_scanned|default:"0" }}</td>
+          <td style="color:var(--danger); font-weight:600;">{{ channel.blocked_messages|default:"0" }}</td>
+          <td>
+            <div style="display:flex; align-items:center; gap:8px;">
+              <div class="progress-bar-wrap" style="min-width:50px; width:70px;">
+                <div class="progress-bar-fill {% if channel.block_rate > 10 %}danger{% endif %}"
+                     style="width:{% if channel.block_rate > 100 %}100{% else %}{{ channel.block_rate|floatformat:0 }}{% endif %}%"></div>
+              </div>
+              <span class="text-sm text-muted">{{ channel.block_rate|floatformat:1 }}%</span>
+            </div>
+          </td>
+          <td>
+            <a href="{% url 'channels:channel-detail' channel.pk %}" class="btn btn-ghost btn-sm">
+              <i class="bi bi-arrow-right"></i> Подробнее
+            </a>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <div class="empty-state">
+    <div class="empty-state-icon"><i class="bi bi-broadcast"></i></div>
+    <h4>Каналов пока нет</h4>
+    <p>Подключите первый канал или группу и начните модерировать с помощью AI.</p>
+    <a href="{% url 'channels:connect' %}" class="btn btn-primary">
+      <i class="bi bi-plug"></i> Подключить бота
+    </a>
+  </div>
+  {% endif %}
+</div>
+
+{% endblock %}
+
+{% block extra_js %}
+<script>
+document.querySelectorAll('.stat-card-value[data-target]').forEach(el => {
+  const target = parseInt(el.dataset.target);
+  if (!target) return;
+  let start = null;
+  function step(ts) {
+    if (!start) start = ts;
+    const p = Math.min((ts - start) / 900, 1);
+    const ease = 1 - Math.pow(1 - p, 3);
+    el.textContent = Math.round(target * ease).toLocaleString('ru');
+    if (p < 1) requestAnimationFrame(step);
+  }
+  requestAnimationFrame(step);
+});
+</script>
 {% endblock %}

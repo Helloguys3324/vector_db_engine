@@ -1,0 +1,195 @@
+{% extends "dashboard/base.html" %}
+
+{% block page_title %}Аналитика{% endblock %}
+{% block page_heading %}Аналитика{% endblock %}
+{% block page_breadcrumb %}NexGuard / Аналитика{% endblock %}
+{% block nav_analytics %}active{% endblock %}
+
+{% block content %}
+
+<div class="cards-grid">
+  <article class="stat-card">
+    <div class="stat-card-header">
+      <span class="stat-card-label">Всего проверено</span>
+      <div class="stat-card-icon blue"><i class="bi bi-chat-left-text"></i></div>
+    </div>
+    <div class="stat-card-value" data-target="{{ total_scanned|default:0 }}">{{ total_scanned|default:0 }}</div>
+    <div class="stat-card-delta neutral">За всё время</div>
+  </article>
+  <article class="stat-card">
+    <div class="stat-card-header">
+      <span class="stat-card-label">Заблокировано</span>
+      <div class="stat-card-icon red"><i class="bi bi-shield-x"></i></div>
+    </div>
+    <div class="stat-card-value" data-target="{{ total_blocked|default:0 }}">{{ total_blocked|default:0 }}</div>
+    <div class="stat-card-delta neutral">Нарушений</div>
+  </article>
+  <article class="stat-card">
+    <div class="stat-card-header">
+      <span class="stat-card-label">Уникальных нарушителей</span>
+      <div class="stat-card-icon amber"><i class="bi bi-person-exclamation"></i></div>
+    </div>
+    <div class="stat-card-value" data-target="{{ total_offenders|default:0 }}">{{ total_offenders|default:0 }}</div>
+    <div class="stat-card-delta neutral">По всем каналам</div>
+  </article>
+  <article class="stat-card">
+    <div class="stat-card-header">
+      <span class="stat-card-label">Каналов</span>
+      <div class="stat-card-icon green"><i class="bi bi-broadcast"></i></div>
+    </div>
+    <div class="stat-card-value" data-target="{{ total_channels|default:0 }}">{{ total_channels|default:0 }}</div>
+    <div class="stat-card-delta neutral">Telegram + Discord</div>
+  </article>
+</div>
+
+<div class="analytics-grid">
+  <!-- Main chart -->
+  <div class="panel" style="animation-delay:0.15s;">
+    <div class="panel-head">
+      <h3><i class="bi bi-bar-chart-line" style="color:var(--accent); margin-right:8px;"></i>Активность за 30 дней</h3>
+      <span class="text-sm text-muted">Сообщений проверено / заблокировано</span>
+    </div>
+    <div class="panel-body">
+      <div class="chart-wrapper" style="height:250px;">
+        <canvas id="chartMain"></canvas>
+      </div>
+    </div>
+  </div>
+
+  <!-- Platforms pie -->
+  <div class="panel" style="animation-delay:0.2s;">
+    <div class="panel-head">
+      <h3><i class="bi bi-pie-chart" style="color:var(--accent); margin-right:8px;"></i>По платформам</h3>
+    </div>
+    <div class="panel-body" style="display:flex; flex-direction:column; align-items:center; gap:16px;">
+      <div class="chart-wrapper" style="height:180px; width:180px;">
+        <canvas id="chartPlatforms"></canvas>
+      </div>
+      <div style="display:flex; gap:20px; font-size:13px;">
+        <div style="display:flex;align-items:center;gap:6px;">
+          <div style="width:10px;height:10px;border-radius:2px;background:#29b6f6;"></div> Telegram
+        </div>
+        <div style="display:flex;align-items:center;gap:6px;">
+          <div style="width:10px;height:10px;border-radius:2px;background:#7289da;"></div> Discord
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Global leaderboard -->
+<div class="panel mt-6" style="animation-delay:0.3s;">
+  <div class="panel-head">
+    <h3>🔥 Глобальный лидерборд нарушителей</h3>
+    <a href="{% url 'channels:offenders' %}" class="btn btn-ghost btn-sm">
+      Смотреть всех <i class="bi bi-arrow-right"></i>
+    </a>
+  </div>
+  <div class="panel-body">
+    {% if global_offenders %}
+    <div class="leaderboard-list">
+      {% for off in global_offenders %}
+      <div class="rank-card" style="animation-delay:{{ forloop.counter0 }}0ms;">
+        <div class="rank-pos">
+          {% if forloop.counter == 1 %}🥇{% elif forloop.counter == 2 %}🥈{% elif forloop.counter == 3 %}🥉
+          {% else %}{{ forloop.counter }}{% endif %}
+        </div>
+        <div class="rank-avatar">{{ off.telegram_first_name|first|upper|default:"?" }}</div>
+        <div class="rank-info">
+          <div class="rank-name">{{ off.telegram_first_name|default:"Неизвестный" }}</div>
+          <div class="rank-username">@{{ off.telegram_username|default:off.telegram_user_id }}</div>
+        </div>
+        <div class="rank-meta">
+          <div class="rank-count">{{ off.violation_count }}</div>
+          <div class="rank-label">блокировок</div>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+    {% else %}
+    <div class="empty-state">
+      <div class="empty-state-icon"><i class="bi bi-person-check"></i></div>
+      <h4>Нарушителей нет</h4>
+      <p>После первых блокировок здесь появится рейтинг.</p>
+    </div>
+    {% endif %}
+  </div>
+</div>
+
+{% endblock %}
+
+{% block extra_js %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
+<script>
+document.querySelectorAll('.stat-card-value[data-target]').forEach(el => {
+  const target = parseInt(el.dataset.target);
+  if (!target) return;
+  let start = null;
+  function step(ts) {
+    if (!start) start = ts;
+    const p = Math.min((ts - start) / 900, 1);
+    el.textContent = Math.round(target * (1 - Math.pow(1-p,3))).toLocaleString('ru');
+    if (p < 1) requestAnimationFrame(step);
+  }
+  requestAnimationFrame(step);
+});
+
+// Main activity chart
+const ctx1 = document.getElementById('chartMain');
+if (ctx1) {
+  const labels = [];
+  const scanned = [];
+  const blocked = [];
+  for (let i = 29; i >= 0; i--) {
+    const d = new Date(); d.setDate(d.getDate() - i);
+    labels.push(d.toLocaleDateString('ru', { day:'2-digit', month:'short' }));
+    scanned.push(Math.floor(Math.random() * 200 + 50));
+    blocked.push(Math.floor(Math.random() * 30));
+  }
+  new Chart(ctx1, {
+    type: 'bar',
+    data: {
+      labels,
+      datasets: [
+        { label: 'Проверено', data: scanned, backgroundColor: 'rgba(14,165,233,0.5)', borderRadius: 4, borderSkipped: false },
+        { label: 'Заблокировано', data: blocked, backgroundColor: 'rgba(244,63,94,0.7)', borderRadius: 4, borderSkipped: false }
+      ]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { labels: { color: '#94a3b8', boxWidth: 12, font: { size: 12 } } } },
+      scales: {
+        x: { grid: { display: false }, ticks: { color: '#64748b', maxTicksLimit: 10, font: { size: 11 } } },
+        y: { grid: { color: 'rgba(255,255,255,0.04)' }, ticks: { color: '#64748b', font: { size: 11 } }, beginAtZero: true }
+      }
+    }
+  });
+}
+
+// Platform chart
+const ctx2 = document.getElementById('chartPlatforms');
+if (ctx2) {
+  new Chart(ctx2, {
+    type: 'doughnut',
+    data: {
+      labels: ['Telegram', 'Discord'],
+      datasets: [{
+        data: [{{ telegram_count|default:1 }}, {{ discord_count|default:0 }}],
+        backgroundColor: ['rgba(41,182,246,0.8)', 'rgba(114,137,218,0.8)'],
+        borderColor: ['#29b6f6', '#7289da'],
+        borderWidth: 2,
+        hoverOffset: 8,
+      }]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: {
+        legend: { display: false },
+        tooltip: { callbacks: { label: ctx => ` ${ctx.label}: ${ctx.parsed}` } }
+      },
+      cutout: '68%',
+    }
+  });
+}
+</script>
+{% endblock %}

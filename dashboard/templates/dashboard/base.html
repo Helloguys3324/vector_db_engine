@@ -1,55 +1,159 @@
 {% load static %}
 <!doctype html>
-<html lang="en">
+<html lang="ru">
 <head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Omega Guard Dashboard</title>
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet">
-    <link href="{% static 'dashboard/styles.css' %}" rel="stylesheet">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex">
+  <title>{% block page_title %}Dashboard{% endblock %} | NexGuard</title>
+  <meta name="description" content="NexGuard — AI-powered moderation dashboard for Telegram & Discord">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet">
+  <link href="{% static 'dashboard/styles.css' %}" rel="stylesheet">
 </head>
 <body>
-    <div class="layout-shell">
-        <aside class="side-nav">
-            <div class="brand">
-                <div class="brand-dot"></div>
-                <span>Omega Guard</span>
-            </div>
-            <nav class="nav-stack">
-                <a href="{% url 'channels:home' %}" class="nav-linkx"><i class="bi bi-grid"></i> Overview</a>
-                <a href="{% url 'channels:channel-create' %}" class="nav-linkx"><i class="bi bi-plus-circle"></i> Add Channel</a>
-                <a href="/admin/" class="nav-linkx"><i class="bi bi-shield-lock"></i> Admin Panel</a>
-            </nav>
-            <div class="side-note">Per-channel moderation control center</div>
-        </aside>
 
-        <main class="main-pane">
-            <header class="top-bar">
-                <h1>{% block page_title %}Dashboard{% endblock %}</h1>
-                <div class="d-flex align-items-center gap-2">
-                    {% if telegram_user %}
-                        <span class="user-pill">
-                            <i class="bi bi-telegram"></i>
-                            @{{ telegram_user.username|default:"user" }}
-                        </span>
-                        <a class="btn btn-outline-light btn-sm" href="{% url 'channels:logout' %}">Logout</a>
-                    {% endif %}
-                    <a class="btn btn-outline-light btn-sm" href="/admin/" target="_blank" rel="noreferrer">Open Django Admin</a>
-                </div>
-            </header>
-            {% if messages %}
-                <div class="mb-3 d-grid gap-2">
-                    {% for message in messages %}
-                        <div class="alert {% if message.tags == 'error' %}alert-danger{% elif message.tags == 'success' %}alert-success{% else %}alert-secondary{% endif %} mb-0" role="alert">
-                            {{ message }}
-                        </div>
-                    {% endfor %}
-                </div>
-            {% endif %}
-            {% block content %}{% endblock %}
-        </main>
+<div class="toast-container" id="toastContainer"></div>
+
+<div class="layout-shell">
+
+  <!-- ===== Sidebar ===== -->
+  <aside class="side-nav" role="navigation" aria-label="Главное меню">
+    <div class="side-nav-inner">
+
+      <div class="brand">
+        <div class="brand-logo">🔷</div>
+        <div class="brand-text">
+          <span class="brand-name">NexGuard</span>
+          <span class="brand-sub">Moderation OS</span>
+        </div>
+      </div>
+
+      <span class="nav-section-label">Навигация</span>
+
+      <nav class="nav-stack">
+        <a href="{% url 'channels:home' %}" class="nav-linkx {% block nav_home %}{% endblock %}">
+          <i class="bi bi-grid-1x2"></i> Обзор
+        </a>
+        <a href="{% url 'channels:analytics' %}" class="nav-linkx {% block nav_analytics %}{% endblock %}">
+          <i class="bi bi-bar-chart-line"></i> Аналитика
+        </a>
+        <a href="{% url 'channels:offenders' %}" class="nav-linkx {% block nav_offenders %}{% endblock %}">
+          <i class="bi bi-exclamation-triangle"></i> Нарушители
+          <span class="nav-badge">🔥</span>
+        </a>
+      </nav>
+
+      <hr class="nav-divider">
+      <span class="nav-section-label">Управление</span>
+
+      <nav class="nav-stack">
+        <a href="{% url 'channels:channel-create' %}" class="nav-linkx {% block nav_add %}{% endblock %}">
+          <i class="bi bi-plus-circle"></i> Добавить канал
+        </a>
+        <a href="{% url 'channels:connect' %}" class="nav-linkx {% block nav_connect %}{% endblock %}">
+          <i class="bi bi-plug"></i> Подключить бота
+        </a>
+      </nav>
+
+      <hr class="nav-divider">
+
+      <nav class="nav-stack">
+        <a href="/admin/" class="nav-linkx" target="_blank">
+          <i class="bi bi-shield-lock"></i> Admin Panel
+        </a>
+      </nav>
+
+      <div class="nav-spacer"></div>
+
+      {% if telegram_user %}
+      <div class="side-user">
+        <div class="side-user-avatar">
+          {{ telegram_user.first_name|first|upper }}
+        </div>
+        <div class="side-user-info">
+          <div class="side-user-name">{{ telegram_user.first_name }}</div>
+          <div class="side-user-role">@{{ telegram_user.username|default:"user" }}</div>
+        </div>
+        <a href="{% url 'channels:logout' %}" title="Выйти" style="color: var(--muted); font-size: 16px;">
+          <i class="bi bi-box-arrow-right"></i>
+        </a>
+      </div>
+      {% endif %}
+
     </div>
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+  </aside>
+
+  <!-- ===== Main Pane ===== -->
+  <main class="main-pane" role="main">
+
+    <div class="top-bar">
+      <div class="top-bar-left">
+        <h1>{% block page_heading %}Dashboard{% endblock %}</h1>
+        <div class="breadcrumb">{% block page_breadcrumb %}NexGuard / Dashboard{% endblock %}</div>
+      </div>
+      <div class="top-bar-right">
+        {% block top_actions %}{% endblock %}
+      </div>
+    </div>
+
+    {% if messages %}
+    <div class="msg-list">
+      {% for message in messages %}
+        <div class="msg {% if message.tags == 'error' %}msg-error{% elif message.tags == 'success' %}msg-success{% elif message.tags == 'warning' %}msg-warning{% else %}msg-info{% endif %}">
+          <i class="bi {% if message.tags == 'error' %}bi-x-circle{% elif message.tags == 'success' %}bi-check-circle{% else %}bi-info-circle{% endif %}"></i>
+          {{ message }}
+        </div>
+      {% endfor %}
+    </div>
+    {% endif %}
+
+    {% block content %}{% endblock %}
+
+  </main>
+</div>
+
+<!-- ===== JS ===== -->
+<script>
+// Toast system
+function showToast(msg, type = 'info') {
+  const icons = { success: 'bi-check-circle', error: 'bi-x-circle', info: 'bi-info-circle' };
+  const toast = document.createElement('div');
+  toast.className = `toast ${type}`;
+  toast.innerHTML = `<i class="bi ${icons[type] || icons.info} toast-icon"></i>
+    <span class="toast-msg">${msg}</span>
+    <button class="toast-close" onclick="this.parentElement.remove()">✕</button>`;
+  document.getElementById('toastContainer').appendChild(toast);
+  setTimeout(() => { toast.classList.add('hiding'); setTimeout(() => toast.remove(), 250); }, 4000);
+}
+
+// CountUp animation
+function animateCountUp(el) {
+  const target = parseInt(el.dataset.target || el.textContent.replace(/[^\d]/g, ''), 10);
+  if (isNaN(target) || target === 0) return;
+  const duration = 900;
+  const start = performance.now();
+  function update(now) {
+    const t = Math.min((now - start) / duration, 1);
+    const eased = 1 - Math.pow(1 - t, 3);
+    el.textContent = Math.round(target * eased).toLocaleString();
+    if (t < 1) requestAnimationFrame(update);
+  }
+  requestAnimationFrame(update);
+}
+
+document.querySelectorAll('.stat-card-value[data-target]').forEach(animateCountUp);
+
+// Active nav link
+(function() {
+  const path = window.location.pathname;
+  document.querySelectorAll('.nav-linkx').forEach(a => {
+    if (a.getAttribute('href') === path) a.classList.add('active');
+  });
+})();
+</script>
+{% block extra_js %}{% endblock %}
 </body>
 </html>

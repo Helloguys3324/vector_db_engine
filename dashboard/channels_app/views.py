@@ -3,6 +3,7 @@ from functools import wraps
 from django.conf import settings
 from django.contrib import messages
 from django.core.exceptions import PermissionDenied
+from django.db.models import Sum
 from django.shortcuts import get_object_or_404, redirect, render
 
 from .forms import ManagedChannelForm
@@ -178,11 +179,115 @@ def channel_detail(request, pk):
     else:
         form = ManagedChannelForm(instance=channel)
 
+    # Try to get offenders for this channel
+    try:
+        from .models import OffenderStats, ViolationEvent
+        offenders = OffenderStats.objects.filter(channel=channel).order_by('-violation_count')[:10]
+        recent_events = ViolationEvent.objects.filter(channel=channel).order_by('-occurred_at')[:8]
+        # Top words aggregation (basic)
+        from django.db.models import Count
+        top_words_qs = (
+            ViolationEvent.objects.filter(channel=channel)
+            .exclude(matched_word='')
+            .values('matched_word')
+            .annotate(count=Count('id'))
+            .order_by('-count')[:10]
+        )
+        max_count = top_words_qs[0]['count'] if top_words_qs else 1
+        top_words = [
+            {'word': w['matched_word'], 'count': w['count'], 'percent': int(w['count'] / max_count * 100)}
+            for w in top_words_qs
+        ]
+    except Exception:
+        offenders = []
+        recent_events = []
+        top_words = []
+
     return render(
         request,
         'dashboard/channel_detail.html',
         {
             'channel': channel,
             'form': form,
+            'offenders': offenders,
+            'recent_events': recent_events,
+            'top_words': top_words,
         },
     )
+
+
+@telegram_login_required
+def analytics_page(request):
+    telegram_user_id = _current_telegram_user_id(request)
+    all_channels = ManagedChannel.objects.filter(platform=ManagedChannel.Platform.TELEGRAM)
+    channels = []
+    for ch in all_channels:
+        try:
+            if is_user_chat_admin(ch.external_id, telegram_user_id):
+                channels.append(ch)
+        except RuntimeError:
+            pass
+
+    total_scanned = sum(c.messages_scanned for c in channels)
+    total_blocked = sum(c.blocked_messages for c in channels)
+    total_channels = len(channels)
+    telegram_count = len([c for c in channels if c.platform == 'telegram'])
+    discord_count  = len([c for c in channels if c.platform == 'discord'])
+
+    try:
+        from .models import OffenderStats
+        global_offenders = OffenderStats.objects.filter(
+            channel__in=channels
+        ).order_by('-violation_count')[:10]
+        total_offenders = OffenderStats.objects.filter(channel__in=channels).values('telegram_user_id').distinct().count()
+    except Exception:
+        global_offenders = []
+        total_offenders = 0
+
+    return render(request, 'dashboard/analytics.html', {
+        'total_scanned': total_scanned,
+        'total_blocked': total_blocked,
+        'total_channels': total_channels,
+        'total_offenders': total_offenders,
+        'telegram_count': max(telegram_count, 1),
+        'discord_count': discord_count,
+        'global_offenders': global_offenders,
+    })
+
+
+@telegram_login_required
+def offenders_page(request):
+    telegram_user_id = _current_telegram_user_id(request)
+    all_channels = ManagedChannel.objects.filter(platform=ManagedChannel.Platform.TELEGRAM)
+    channels = []
+    for ch in all_channels:
+        try:
+            if is_user_chat_admin(ch.external_id, telegram_user_id):
+                channels.append(ch)
+        except RuntimeError:
+            pass
+
+    try:
+        from .models import OffenderStats
+        offenders = OffenderStats.objects.filter(channel__in=channels).order_by('-violation_count')[:50]
+    except Exception:
+        offenders = []
+
+    return render(request, 'dashboard/offenders.html', {'offenders': offenders})
+
+
+@telegram_login_required
+def connect_page(request):
+    platform = request.GET.get('platform', '')
+    step = int(request.GET.get('step', 1))
+    bot_username = ''
+    try:
+        bot_username = resolve_telegram_login_bot_username()
+    except Exception:
+        pass
+    return render(request, 'dashboard/connect.html', {
+        'platform': platform,
+        'step': step,
+        'bot_username': bot_username,
+        'discord_oauth_url': '',  # TODO: configure Discord OAuth URL
+    })

@@ -1,36 +1,53 @@
 {% extends "dashboard/base.html" %}
 
-{% block page_title %}Add Channel{% endblock %}
+{% block page_title %}Добавить канал{% endblock %}
+{% block page_heading %}Добавить канал{% endblock %}
+{% block page_breadcrumb %}NexGuard / Добавить канал{% endblock %}
+{% block nav_add %}active{% endblock %}
 
 {% block content %}
-<section class="panel">
+<div style="max-width:680px;">
+  <div class="panel">
     <div class="panel-head">
-        <h3>New managed channel</h3>
+      <h3><i class="bi bi-plus-circle" style="color:var(--accent);margin-right:8px;"></i>Новый канал или сервер</h3>
     </div>
-    <p class="text-secondary small mb-3">Channel will be added only if your Telegram account is admin in this chat.</p>
-    <form method="post" class="row g-3">
+    <div class="panel-body">
+      <p class="text-soft text-sm" style="margin-bottom:20px;">
+        Канал будет добавлен только если ваш Telegram аккаунт является администратором этого чата.
+      </p>
+      <form method="post">
         {% csrf_token %}
         {% for field in form %}
-            {% if field.field.widget.input_type == 'checkbox' %}
-            <div class="col-12">
-                <div class="form-check mt-2">
-                    {{ field }}
-                    <label class="form-check-label">{{ field.label }}</label>
-                </div>
-            {% else %}
-            <div class="col-12 col-lg-6">
-                <label class="form-label">{{ field.label }}</label>
-                {{ field }}
-                {% if field.errors %}
-                    <div class="text-danger small mt-1">{{ field.errors|striptags }}</div>
-                {% endif %}
+          {% if field.field.widget.input_type == 'checkbox' %}
+          <div class="toggle-wrap" style="margin-bottom:10px;">
+            <div>
+              <div class="toggle-label">{{ field.label }}</div>
+              {% if field.help_text %}<div class="toggle-desc">{{ field.help_text }}</div>{% endif %}
             </div>
+            <label class="toggle-switch">
+              {{ field }}
+              <span class="toggle-slider"></span>
+            </label>
+          </div>
+          {% else %}
+          <div class="form-group">
+            <label class="form-label">{{ field.label }}</label>
+            {{ field }}
+            {% if field.help_text %}
+              <div class="form-hint">{{ field.help_text }}</div>
             {% endif %}
+            {% if field.errors %}
+              <div class="text-danger text-sm" style="margin-top:5px;">{{ field.errors|striptags }}</div>
+            {% endif %}
+          </div>
+          {% endif %}
         {% endfor %}
-        <div class="col-12 d-flex gap-2 mt-2">
-            <button type="submit" class="btn btn-primary">Create channel</button>
-            <a href="{% url 'channels:home' %}" class="btn btn-outline-light">Cancel</a>
+        <div style="display:flex; gap:10px; margin-top:8px;">
+          <button type="submit" class="btn btn-primary"><i class="bi bi-check2"></i> Создать канал</button>
+          <a href="{% url 'channels:home' %}" class="btn btn-ghost">Отмена</a>
         </div>
-    </form>
-</section>
+      </form>
+    </div>
+  </div>
+</div>
 {% endblock %}

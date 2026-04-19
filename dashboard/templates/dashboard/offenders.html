@@ -1,0 +1,74 @@
+{% extends "dashboard/base.html" %}
+
+{% block page_title %}Нарушители{% endblock %}
+{% block page_heading %}Нарушители {% endblock %}
+{% block page_breadcrumb %}NexGuard / Нарушители{% endblock %}
+{% block nav_offenders %}active{% endblock %}
+
+{% block content %}
+
+<div class="panel">
+  <div class="panel-head">
+    <h3>🔥 Глобальный лидерборд</h3>
+    <div style="display:flex; gap:8px;">
+      <button class="btn btn-ghost btn-sm period-btn active" onclick="setPeriod(this,'all')">Всё время</button>
+      <button class="btn btn-ghost btn-sm period-btn" onclick="setPeriod(this,'month')">Месяц</button>
+      <button class="btn btn-ghost btn-sm period-btn" onclick="setPeriod(this,'week')">Неделя</button>
+    </div>
+  </div>
+
+  <div class="panel-body">
+    {% if offenders %}
+    <div class="leaderboard-list" id="globalOffendersList">
+      {% for off in offenders %}
+      <div class="rank-card" style="animation-delay:{{ forloop.counter0 }}0ms;">
+        <div class="rank-pos">
+          {% if forloop.counter == 1 %}🥇{% elif forloop.counter == 2 %}🥈{% elif forloop.counter == 3 %}🥉
+          {% else %}{{ forloop.counter }}{% endif %}
+        </div>
+        <div class="rank-avatar">{{ off.telegram_first_name|first|upper|default:"?" }}</div>
+        <div class="rank-info">
+          <div class="rank-name">{{ off.telegram_first_name|default:"Неизвестный" }}</div>
+          <div class="rank-username">
+            {% if off.telegram_username %}@{{ off.telegram_username }}{% else %}ID: {{ off.telegram_user_id }}{% endif %}
+            <span class="text-muted"> · </span>
+            {% for ch in off.channels_list %}
+              <span style="font-size:11px; color:var(--accent);">{{ ch }}</span>{% if not forloop.last %}, {% endif %}
+            {% endfor %}
+          </div>
+        </div>
+        {% if off.top_word %}
+        <span class="rank-word" onclick="toggleWord(this,'{{ off.top_word }}')" title="Нажмите чтобы показать">
+          {{ off.top_word|slice:":1" }}•••••••
+        </span>
+        {% endif %}
+        <div class="rank-meta">
+          <div class="rank-count">{{ off.violation_count }}</div>
+          <div class="rank-label">блокировок</div>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+    {% else %}
+    <div class="empty-state">
+      <div class="empty-state-icon"><i class="bi bi-person-check"></i></div>
+      <h4>Нарушителей нет</h4>
+      <p>После первых блокировок здесь появится рейтинг нарушителей по всем каналам.</p>
+    </div>
+    {% endif %}
+  </div>
+</div>
+
+{% endblock %}
+
+{% block extra_js %}
+<script>
+function toggleWord(el, word) {
+  el.textContent = el.textContent.includes('•') ? word : word.slice(0,1) + '•'.repeat(7);
+}
+function setPeriod(btn, period) {
+  document.querySelectorAll('.period-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+}
+</script>
+{% endblock %}

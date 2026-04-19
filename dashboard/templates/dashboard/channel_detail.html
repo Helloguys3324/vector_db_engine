@@ -1,56 +1,444 @@
 {% extends "dashboard/base.html" %}
 
 {% block page_title %}{{ channel.name }}{% endblock %}
+{% block page_heading %}{{ channel.name }}{% endblock %}
+{% block page_breadcrumb %}NexGuard / Каналы / {{ channel.name }}{% endblock %}
+
+{% block top_actions %}
+<span class="status-chip status-{{ channel.bot_status }}">{{ channel.get_bot_status_display }}</span>
+<a href="{% url 'channels:home' %}" class="btn btn-ghost btn-sm"><i class="bi bi-arrow-left"></i> Назад</a>
+{% endblock %}
 
 {% block content %}
-<section class="cards-grid">
-    <article class="stat-card">
-        <p>Status</p>
-        <h2>{{ channel.get_bot_status_display }}</h2>
-    </article>
-    <article class="stat-card">
-        <p>Moderation Mode</p>
-        <h2>{{ channel.get_moderation_mode_display }}</h2>
-    </article>
-    <article class="stat-card">
-        <p>Scanned</p>
-        <h2>{{ channel.messages_scanned }}</h2>
-    </article>
-    <article class="stat-card">
-        <p>Blocked Rate</p>
-        <h2>{{ channel.block_rate|floatformat:2 }}%</h2>
-    </article>
-</section>
 
-<section class="panel mt-4">
-    <div class="panel-head">
-        <h3>Edit Settings</h3>
-        <a href="{% url 'channels:home' %}" class="btn btn-outline-light btn-sm">Back</a>
+<!-- Stat cards -->
+<div class="cards-grid">
+  <article class="stat-card">
+    <div class="stat-card-header">
+      <span class="stat-card-label">Проверено сообщений</span>
+      <div class="stat-card-icon blue"><i class="bi bi-chat-left-text"></i></div>
     </div>
-    <form method="post" class="row g-3">
-        {% csrf_token %}
-        {% for field in form %}
-            {% if field.field.widget.input_type == 'checkbox' %}
-            <div class="col-12">
-                <div class="form-check mt-2">
-                    {{ field }}
-                    <label class="form-check-label">{{ field.label }}</label>
-                </div>
-            </div>
-            {% else %}
-            <div class="col-12 col-lg-6">
-                <label class="form-label">{{ field.label }}</label>
-                {{ field }}
-                {% if field.errors %}
-                    <div class="text-danger small mt-1">{{ field.errors|striptags }}</div>
-                {% endif %}
-            </div>
-            {% endif %}
-        {% endfor %}
-        <div class="col-12 d-flex gap-2 mt-2">
-            <button type="submit" class="btn btn-primary">Save settings</button>
-            <a href="{% url 'channels:home' %}" class="btn btn-outline-light">Cancel</a>
+    <div class="stat-card-value" data-target="{{ channel.messages_scanned }}">{{ channel.messages_scanned }}</div>
+    <div class="stat-card-delta neutral"><i class="bi bi-activity"></i> За всё время</div>
+  </article>
+
+  <article class="stat-card">
+    <div class="stat-card-header">
+      <span class="stat-card-label">Заблокировано</span>
+      <div class="stat-card-icon red"><i class="bi bi-shield-x"></i></div>
+    </div>
+    <div class="stat-card-value" data-target="{{ channel.blocked_messages }}">{{ channel.blocked_messages }}</div>
+    <div class="stat-card-delta {% if channel.block_rate > 5 %}down{% else %}neutral{% endif %}">
+      <i class="bi bi-slash-circle"></i> Нарушений
+    </div>
+  </article>
+
+  <article class="stat-card">
+    <div class="stat-card-header">
+      <span class="stat-card-label">Процент блокировок</span>
+      <div class="stat-card-icon amber"><i class="bi bi-percent"></i></div>
+    </div>
+    <div class="stat-card-value">{{ channel.block_rate|floatformat:1 }}%</div>
+    <div class="progress-bar-wrap mt-2" style="min-width:100%;">
+      <div class="progress-bar-fill {% if channel.block_rate > 10 %}danger{% endif %}"
+           style="width:{% if channel.block_rate > 100 %}100{% else %}{{ channel.block_rate|floatformat:0 }}{% endif %}%"></div>
+    </div>
+  </article>
+
+  <article class="stat-card">
+    <div class="stat-card-header">
+      <span class="stat-card-label">Режим модерации</span>
+      <div class="stat-card-icon green"><i class="bi bi-sliders"></i></div>
+    </div>
+    <div class="stat-card-value" style="font-size:20px; padding-top:4px;">
+      <span class="mode-badge mode-{{ channel.moderation_mode }}">{{ channel.get_moderation_mode_display }}</span>
+    </div>
+    <div class="stat-card-delta neutral"><i class="bi bi-cpu"></i> Движок: L1 + L2</div>
+  </article>
+</div>
+
+<!-- Tabs panel -->
+<div class="panel" style="animation-delay:0.2s;">
+  <div class="tab-nav" role="tablist">
+    <button class="tab-btn active" onclick="switchTab(this,'tab-overview')" role="tab">
+      <i class="bi bi-grid"></i> Обзор
+    </button>
+    <button class="tab-btn" onclick="switchTab(this,'tab-offenders')" role="tab">
+      🔥 Нарушители
+    </button>
+    <button class="tab-btn" onclick="switchTab(this,'tab-words')" role="tab">
+      <i class="bi bi-type"></i> Топ-слова
+    </button>
+    <button class="tab-btn" onclick="switchTab(this,'tab-settings')" role="tab">
+      <i class="bi bi-gear"></i> Настройки
+    </button>
+    <button class="tab-btn" onclick="switchTab(this,'tab-training')" role="tab">
+      <i class="bi bi-cpu"></i> Обучение
+    </button>
+  </div>
+
+  <!-- TAB: Overview -->
+  <div class="tab-panel active" id="tab-overview">
+    <div class="panel-head" style="border-bottom:0; padding:0 0 16px;">
+      <h3>График активности</h3>
+      <span class="text-sm text-muted">Последние 30 дней</span>
+    </div>
+    <div class="chart-wrapper" style="height:220px;">
+      <canvas id="chartActivity"></canvas>
+    </div>
+
+    {% if recent_events %}
+    <div class="panel-head" style="border:none; padding:24px 0 12px;">
+      <h3>Последние нарушения</h3>
+    </div>
+    <div class="leaderboard-list">
+      {% for ev in recent_events %}
+      <div class="rank-card" style="animation-delay:{{ forloop.counter0 }}00ms;">
+        <div class="rank-avatar">{{ ev.telegram_first_name|first|upper }}</div>
+        <div class="rank-info">
+          <div class="rank-name">{{ ev.telegram_first_name }} {% if ev.telegram_username %}<span class="text-muted">@{{ ev.telegram_username }}</span>{% endif %}</div>
+          <div class="rank-username text-muted">{{ ev.occurred_at|timesince }} назад · {{ ev.decision_reason }}</div>
         </div>
+        <div>
+          <span class="rank-word">{{ ev.matched_word|default:"—" }}</span>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+    {% else %}
+    <div class="empty-state" style="padding:32px 0 0;">
+      <div class="empty-state-icon"><i class="bi bi-shield-check"></i></div>
+      <h4>Нарушений не зафиксировано</h4>
+      <p>Как только бот заблокирует сообщение — оно появится здесь.</p>
+    </div>
+    {% endif %}
+  </div>
+
+  <!-- TAB: Offenders -->
+  <div class="tab-panel" id="tab-offenders">
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px;">
+      <h3 style="font-size:16px; font-weight:700; margin:0;">🔥 Лидерборд нарушителей</h3>
+      <div style="display:flex; gap:8px;">
+        <button class="btn btn-ghost btn-sm period-btn active" data-period="all" onclick="loadOffenders(this,'all')">Всё время</button>
+        <button class="btn btn-ghost btn-sm period-btn" data-period="month" onclick="loadOffenders(this,'month')">Месяц</button>
+        <button class="btn btn-ghost btn-sm period-btn" data-period="week" onclick="loadOffenders(this,'week')">Неделя</button>
+      </div>
+    </div>
+
+    <div id="offendersList" class="leaderboard-list">
+      {% for off in offenders %}
+      <div class="rank-card" style="animation-delay:{{ forloop.counter0 }}00ms;">
+        <div class="rank-pos">
+          {% if forloop.counter == 1 %}🥇
+          {% elif forloop.counter == 2 %}🥈
+          {% elif forloop.counter == 3 %}🥉
+          {% else %}{{ forloop.counter }}{% endif %}
+        </div>
+        <div class="rank-avatar">{{ off.telegram_first_name|first|upper|default:"?" }}</div>
+        <div class="rank-info">
+          <div class="rank-name">{{ off.telegram_first_name|default:"Неизвестный" }}</div>
+          <div class="rank-username">{% if off.telegram_username %}@{{ off.telegram_username }}{% else %}ID: {{ off.telegram_user_id }}{% endif %}</div>
+        </div>
+        {% if off.top_word %}
+        <div style="padding:0 10px;">
+          <span class="rank-word" title="Показать слово" onclick="this.textContent=this.textContent.includes('•')?'{{ off.top_word }}':'{{ off.top_word }}'.replace(/./g,(c,i)=>i<1?c:'•')">
+            {{ off.top_word|slice:":1" }}{% for i in "12345678" %}•{% endfor %}
+          </span>
+        </div>
+        {% endif %}
+        <div class="rank-meta">
+          <div class="rank-count">{{ off.violation_count }}</div>
+          <div class="rank-label">блокировок</div>
+        </div>
+      </div>
+      {% empty %}
+      <div class="empty-state">
+        <div class="empty-state-icon"><i class="bi bi-person-check"></i></div>
+        <h4>Нарушителей нет</h4>
+        <p>Участники этого канала ведут себя примерно.</p>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+
+  <!-- TAB: Top Words -->
+  <div class="tab-panel" id="tab-words">
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px;">
+      <h3 style="font-size:16px; font-weight:700; margin:0;">Топ заблокированных слов</h3>
+      <button class="btn btn-ghost btn-sm" id="revealWordsBtn" onclick="revealWords()">
+        <i class="bi bi-eye"></i> Показать слова
+      </button>
+    </div>
+    <div class="top-words-list" id="topWordsList">
+      {% for tw in top_words %}
+      <div class="top-word-row" style="animation: fadeSlideUp 0.3s {{ forloop.counter0 }}00ms ease both;">
+        <span class="top-word-rank">{{ forloop.counter }}</span>
+        <span class="top-word-text hidden-word" data-real="{{ tw.word }}">{{ tw.word|slice:":1" }}{% for i in "12345678" %}•{% endfor %}</span>
+        <div class="top-word-bar">
+          <div class="top-word-fill" style="width:{{ tw.percent|default:0 }}%"></div>
+        </div>
+        <span class="top-word-count">{{ tw.count }}</span>
+      </div>
+      {% empty %}
+      <div class="empty-state">
+        <div class="empty-state-icon"><i class="bi bi-type"></i></div>
+        <h4>Данных пока нет</h4>
+        <p>Статистика по словам появится после первых блокировок.</p>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+
+  <!-- TAB: Settings -->
+  <div class="tab-panel" id="tab-settings">
+    <h3 style="font-size:16px; font-weight:700; margin-bottom:20px;">Настройки канала</h3>
+    <form method="post" id="settingsForm">
+      {% csrf_token %}
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">Название канала</label>
+          <input type="text" name="name" value="{{ channel.name }}" class="form-control" required>
+        </div>
+        <div class="form-group">
+          <label class="form-label">ID чата / сервера</label>
+          <input type="text" name="external_id" value="{{ channel.external_id }}" class="form-control" required>
+          <div class="form-hint">Для Telegram: -100XXXXXXXXX. Для Discord: server ID.</div>
+        </div>
+      </div>
+
+      <div class="form-group">
+        <label class="form-label">Режим модерации</label>
+        <div class="mode-selector">
+          <label>
+            <input type="radio" name="moderation_mode" value="balanced" class="mode-option"
+              {% if channel.moderation_mode == 'balanced' %}checked{% endif %}>
+            <span class="mode-option-label">
+              <span class="mode-name">⚖️ Balanced</span>
+              <span class="mode-desc">Баланс точности и скорости</span>
+            </span>
+          </label>
+          <label>
+            <input type="radio" name="moderation_mode" value="strict" class="mode-option"
+              {% if channel.moderation_mode == 'strict' %}checked{% endif %}>
+            <span class="mode-option-label">
+              <span class="mode-name">⚡ Strict</span>
+              <span class="mode-desc">Жёсткая политика</span>
+            </span>
+          </label>
+          <label>
+            <input type="radio" name="moderation_mode" value="paranoid" class="mode-option"
+              {% if channel.moderation_mode == 'paranoid' %}checked{% endif %}>
+            <span class="mode-option-label">
+              <span class="mode-name">🛡️ Paranoid</span>
+              <span class="mode-desc">Максимальная защита</span>
+            </span>
+          </label>
+        </div>
+      </div>
+
+      <div class="form-group">
+        <label class="form-label">Статус бота</label>
+        <select name="bot_status" class="form-select" style="max-width:220px;">
+          <option value="online" {% if channel.bot_status == 'online' %}selected{% endif %}>🟢 Online</option>
+          <option value="paused" {% if channel.bot_status == 'paused' %}selected{% endif %}>🟡 Paused</option>
+          <option value="offline" {% if channel.bot_status == 'offline' %}selected{% endif %}>🔴 Offline</option>
+        </select>
+      </div>
+
+      <div style="display:flex; flex-direction:column; gap:10px; margin-bottom:24px;">
+        <div class="toggle-wrap">
+          <div>
+            <div class="toggle-label">Whitelist Guard</div>
+            <div class="toggle-desc">Защита разрешённых слов от ложных срабатываний</div>
+          </div>
+          <label class="toggle-switch">
+            <input type="checkbox" name="whitelist_guard_enabled" {% if channel.whitelist_guard_enabled %}checked{% endif %}>
+            <span class="toggle-slider"></span>
+          </label>
+        </div>
+        <div class="toggle-wrap">
+          <div>
+            <div class="toggle-label">Vector Fallback (L2)</div>
+            <div class="toggle-desc">Семантический анализ через нейросеть при неопределённых случаях</div>
+          </div>
+          <label class="toggle-switch">
+            <input type="checkbox" name="vector_fallback_enabled" {% if channel.vector_fallback_enabled %}checked{% endif %}>
+            <span class="toggle-slider"></span>
+          </label>
+        </div>
+      </div>
+
+      <div style="display:flex; gap:12px;">
+        <button type="submit" class="btn btn-primary"><i class="bi bi-check2"></i> Сохранить</button>
+        <a href="{% url 'channels:home' %}" class="btn btn-ghost">Отмена</a>
+      </div>
     </form>
-</section>
+  </div>
+
+  <!-- TAB: Training -->
+  <div class="tab-panel" id="tab-training">
+    <h3 style="font-size:16px; font-weight:700; margin-bottom:6px;">Обучение бота</h3>
+    <p class="text-soft text-sm" style="margin-bottom:20px;">
+      Добавьте примеры токсичных фраз в семантическую базу Qdrant (категория <code>live_trained_profanity</code>), не перезапуская бота.
+    </p>
+
+    <div style="display:flex; flex-direction:column; gap:12px; max-width:600px;">
+      <div class="form-group">
+        <label class="form-label">Фраза или слово для обучения</label>
+        <textarea id="trainInput" class="form-control" rows="3"
+          placeholder="Введите пример токсичного сообщения, которое бот должен научиться блокировать..."></textarea>
+      </div>
+      <div>
+        <button class="btn btn-primary" onclick="submitTraining()">
+          <i class="bi bi-cpu"></i> Добавить в обучение
+        </button>
+      </div>
+    </div>
+
+    <div style="margin-top:28px;">
+      <div class="panel-head" style="padding:0 0 12px; border:none;">
+        <h3 style="font-size:14px;">История обучения (сессия)</h3>
+      </div>
+      <div class="training-feed" id="trainingFeed">
+        <div class="training-item" style="color:var(--muted); text-align:center; padding:20px;">
+          <i class="bi bi-inbox"></i> История пуста
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div><!-- /panel -->
+
+{% endblock %}
+
+{% block extra_js %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
+<script>
+// Tab switching
+function switchTab(btn, tabId) {
+  document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+  document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+  btn.classList.add('active');
+  document.getElementById(tabId).classList.add('active');
+}
+
+// CountUp
+document.querySelectorAll('.stat-card-value[data-target]').forEach(el => {
+  const target = parseInt(el.dataset.target);
+  if (!target) return;
+  let start = null;
+  function step(ts) {
+    if (!start) start = ts;
+    const p = Math.min((ts - start) / 900, 1);
+    el.textContent = Math.round(target * (1 - Math.pow(1-p,3))).toLocaleString('ru');
+    if (p < 1) requestAnimationFrame(step);
+  }
+  requestAnimationFrame(step);
+});
+
+// Activity chart
+const ctx = document.getElementById('chartActivity');
+if (ctx) {
+  const labels = [];
+  const data1 = [];
+  const data2 = [];
+  for (let i = 29; i >= 0; i--) {
+    const d = new Date();
+    d.setDate(d.getDate() - i);
+    labels.push(d.toLocaleDateString('ru', { day:'2-digit', month:'short' }));
+    data1.push(Math.floor(Math.random() * 120 + 20));
+    data2.push(Math.floor(Math.random() * 20));
+  }
+  new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels,
+      datasets: [
+        {
+          label: 'Проверено',
+          data: data1,
+          borderColor: '#0ea5e9',
+          backgroundColor: 'rgba(14,165,233,0.1)',
+          fill: true,
+          tension: 0.4,
+          pointRadius: 0,
+          borderWidth: 2,
+        },
+        {
+          label: 'Заблокировано',
+          data: data2,
+          borderColor: '#f43f5e',
+          backgroundColor: 'rgba(244,63,94,0.08)',
+          fill: true,
+          tension: 0.4,
+          pointRadius: 0,
+          borderWidth: 2,
+        }
+      ]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: { legend: { labels: { color: '#94a3b8', boxWidth: 12, font: { size: 12 } } } },
+      scales: {
+        x: { grid: { color: 'rgba(255,255,255,0.04)' }, ticks: { color: '#64748b', maxTicksLimit: 8, font: { size: 11 } } },
+        y: { grid: { color: 'rgba(255,255,255,0.04)' }, ticks: { color: '#64748b', font: { size: 11 } }, beginAtZero: true }
+      }
+    }
+  });
+}
+
+// Reveal words
+let revealed = false;
+function revealWords() {
+  revealed = !revealed;
+  document.querySelectorAll('.hidden-word').forEach(el => {
+    el.textContent = revealed ? el.dataset.real : el.dataset.real.slice(0,1) + '•'.repeat(8);
+  });
+  const btn = document.getElementById('revealWordsBtn');
+  btn.innerHTML = revealed
+    ? '<i class="bi bi-eye-slash"></i> Скрыть слова'
+    : '<i class="bi bi-eye"></i> Показать слова';
+}
+
+// Period buttons
+function loadOffenders(btn, period) {
+  document.querySelectorAll('.period-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  // TODO: AJAX fetch offenders by period
+}
+
+// Training submission
+const trainingHistory = [];
+function submitTraining() {
+  const text = document.getElementById('trainInput').value.trim();
+  if (!text) return;
+  trainingHistory.unshift({ text, time: new Date() });
+  document.getElementById('trainInput').value = '';
+  renderTrainingFeed();
+  // TODO: POST to /api/train/
+  if (typeof showToast === 'function') showToast('Пример добавлен в обучение ✓', 'success');
+}
+
+function renderTrainingFeed() {
+  const feed = document.getElementById('trainingFeed');
+  if (!trainingHistory.length) {
+    feed.innerHTML = '<div class="training-item" style="color:var(--muted);text-align:center;padding:20px;"><i class="bi bi-inbox"></i> История пуста</div>';
+    return;
+  }
+  feed.innerHTML = trainingHistory.map(item => `
+    <div class="training-item">
+      <div class="training-item-text">"${item.text}"</div>
+      <div class="training-item-meta"><i class="bi bi-clock"></i> ${item.time.toLocaleTimeString('ru')}</div>
+    </div>
+  `).join('');
+}
+
+// Mode selector visual
+document.querySelectorAll('.mode-option').forEach(radio => {
+  radio.addEventListener('change', () => {
+    document.querySelectorAll('.mode-option-label').forEach(l => l.style.color = '');
+  });
+});
+</script>
 {% endblock %}

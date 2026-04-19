@@ -1,0 +1,260 @@
+{% extends "dashboard/base.html" %}
+
+{% block page_title %}Подключить бота{% endblock %}
+{% block page_heading %}Подключить бота{% endblock %}
+{% block page_breadcrumb %}NexGuard / Подключить бота{% endblock %}
+{% block nav_connect %}active{% endblock %}
+
+{% block content %}
+
+{% if not platform %}
+<!-- Platform selection -->
+<div style="max-width:700px; margin:0 auto; padding-top:20px;">
+  <div style="text-align:center; margin-bottom:36px;">
+    <h2 style="font-size:24px; font-weight:700; margin-bottom:8px;">Выберите платформу</h2>
+    <p class="text-soft">Добавьте NexGuard бота в вашу группу Telegram или Discord-сервер</p>
+  </div>
+
+  <div class="platform-select-grid">
+    <a href="?platform=telegram" class="platform-card">
+      <div class="platform-card-icon">🔵</div>
+      <div class="platform-card-name" style="color:var(--text);">Telegram</div>
+      <div class="platform-card-desc">Добавить бота в группу, канал или супергруппу</div>
+      <div style="margin-top:16px;">
+        <span class="btn btn-primary btn-sm" style="pointer-events:none;">
+          <i class="bi bi-telegram"></i> Начать →
+        </span>
+      </div>
+    </a>
+
+    <a href="?platform=discord" class="platform-card discord">
+      <div class="platform-card-icon">🟣</div>
+      <div class="platform-card-name" style="color:var(--text);">Discord</div>
+      <div class="platform-card-desc">Подключить сервер через OAuth Discord авторизацию</div>
+      <div style="margin-top:16px;">
+        <span class="btn btn-sm" style="pointer-events:none; background:rgba(114,137,218,0.2); color:#7289da; border:1px solid rgba(114,137,218,0.3);">
+          <i class="bi bi-discord"></i> Начать →
+        </span>
+      </div>
+    </a>
+  </div>
+</div>
+
+{% elif platform == 'telegram' %}
+<!-- Telegram Wizard -->
+<div style="max-width:680px; margin:0 auto;">
+  <div style="margin-bottom:32px;">
+    <a href="{% url 'channels:connect' %}" class="btn btn-ghost btn-sm" style="margin-bottom:16px;">
+      <i class="bi bi-arrow-left"></i> Назад
+    </a>
+    <h2 style="font-size:22px; font-weight:700; margin-bottom:6px;">
+      <i class="bi bi-telegram" style="color:#29b6f6;"></i> Подключение Telegram
+    </h2>
+    <p class="text-soft">Следуйте 3 шагам, чтобы добавить бота в вашу группу</p>
+  </div>
+
+  <!-- Steps indicator -->
+  <div class="wizard-steps" style="margin-bottom:32px;">
+    <div class="wizard-step-item {% if step >= 1 %}{% if step > 1 %}done{% else %}active{% endif %}{% endif %}">
+      <div class="wizard-step-wrap">
+        <div class="wizard-step-circle">{% if step > 1 %}<i class="bi bi-check"></i>{% else %}1{% endif %}</div>
+        <div class="wizard-step-label">Добавить бота</div>
+      </div>
+    </div>
+    <div class="wizard-step-line"></div>
+    <div class="wizard-step-item {% if step >= 2 %}{% if step > 2 %}done{% else %}active{% endif %}{% endif %}">
+      <div class="wizard-step-wrap">
+        <div class="wizard-step-circle">{% if step > 2 %}<i class="bi bi-check"></i>{% else %}2{% endif %}</div>
+        <div class="wizard-step-label">Права админа</div>
+      </div>
+    </div>
+    <div class="wizard-step-line"></div>
+    <div class="wizard-step-item {% if step >= 3 %}active{% endif %}">
+      <div class="wizard-step-wrap">
+        <div class="wizard-step-circle">3</div>
+        <div class="wizard-step-label">Регистрация</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Step 1 -->
+  <div class="wizard-card" id="wiz-step-1" {% if step != 1 %}style="display:none;"{% endif %}>
+    <h3>Шаг 1: Добавьте бота в чат</h3>
+    <p class="wizard-sub">Откройте настройки группы и добавьте нашего бота как участника</p>
+
+    <ul class="instruction-list">
+      <li>
+        <div class="instruction-num">1</div>
+        <div>Откройте вашу Telegram-группу → <strong>Участники</strong> → <strong>Добавить участника</strong></div>
+      </li>
+      <li>
+        <div class="instruction-num">2</div>
+        <div>Найдите и добавьте бота: <code style="background:var(--surface-3);padding:2px 8px;border-radius:4px;">@{{ bot_username|default:"nexguard_bot" }}</code></div>
+      </li>
+      <li>
+        <div class="instruction-num">3</div>
+        <div>Убедитесь, что бот появился в списке участников группы</div>
+      </li>
+    </ul>
+
+    <button class="btn btn-primary" onclick="wizardNext(1)">
+      Готово, бот добавлен <i class="bi bi-arrow-right"></i>
+    </button>
+  </div>
+
+  <!-- Step 2 -->
+  <div class="wizard-card" id="wiz-step-2" {% if step != 2 %}style="display:none;"{% endif %}>
+    <h3>Шаг 2: Выдайте права администратора</h3>
+    <p class="wizard-sub">Боту нужны права для удаления сообщений</p>
+
+    <ul class="instruction-list">
+      <li>
+        <div class="instruction-num">1</div>
+        <div>В настройках группы → <strong>Администраторы</strong> → <strong>Добавить администратора</strong></div>
+      </li>
+      <li>
+        <div class="instruction-num">2</div>
+        <div>Выберите бота из списка участников</div>
+      </li>
+      <li>
+        <div class="instruction-num">3</div>
+        <div>Включите разрешения: <strong>Удалять сообщения</strong>, <strong>Блокировать участников</strong></div>
+      </li>
+    </ul>
+
+    <div style="display:flex; gap:10px;">
+      <button class="btn btn-ghost" onclick="wizardPrev(2)"><i class="bi bi-arrow-left"></i> Назад</button>
+      <button class="btn btn-primary" onclick="wizardNext(2)">
+        Готово, права выданы <i class="bi bi-arrow-right"></i>
+      </button>
+    </div>
+  </div>
+
+  <!-- Step 3: Register channel form -->
+  <div class="wizard-card" id="wiz-step-3" {% if step != 3 %}style="display:none;"{% endif %}>
+    <h3>Шаг 3: Зарегистрируйте канал</h3>
+    <p class="wizard-sub">Укажите данные вашего чата для добавления в дашборд</p>
+
+    <form method="post" action="{% url 'channels:channel-create' %}">
+      {% csrf_token %}
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">Название канала</label>
+          <input type="text" name="name" class="form-control" placeholder="Мой чат" required>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Chat ID</label>
+          <input type="text" name="external_id" class="form-control" placeholder="-100123456789" required>
+          <div class="form-hint">
+            Напишите боту <a href="https://t.me/userinfobot" target="_blank">@userinfobot</a> в своей группе — он пришлёт ID
+          </div>
+        </div>
+      </div>
+      <input type="hidden" name="platform" value="telegram">
+
+      <div class="form-group">
+        <label class="form-label">Режим модерации</label>
+        <div class="mode-selector">
+          <label>
+            <input type="radio" name="moderation_mode" value="balanced" class="mode-option" checked>
+            <span class="mode-option-label">
+              <span class="mode-name">⚖️ Balanced</span>
+              <span class="mode-desc">Рекомендуется</span>
+            </span>
+          </label>
+          <label>
+            <input type="radio" name="moderation_mode" value="strict" class="mode-option">
+            <span class="mode-option-label">
+              <span class="mode-name">⚡ Strict</span>
+              <span class="mode-desc">Жёсткая политика</span>
+            </span>
+          </label>
+          <label>
+            <input type="radio" name="moderation_mode" value="paranoid" class="mode-option">
+            <span class="mode-option-label">
+              <span class="mode-name">🛡️ Paranoid</span>
+              <span class="mode-desc">Максимум защиты</span>
+            </span>
+          </label>
+        </div>
+      </div>
+
+      <div style="display:flex; gap:10px; margin-top:8px;">
+        <button type="button" class="btn btn-ghost" onclick="wizardPrev(3)"><i class="bi bi-arrow-left"></i> Назад</button>
+        <button type="submit" class="btn btn-primary">
+          <i class="bi bi-check2-circle"></i> Подключить канал
+        </button>
+      </div>
+    </form>
+  </div>
+</div>
+
+{% elif platform == 'discord' %}
+<!-- Discord Wizard -->
+<div style="max-width:680px; margin:0 auto;">
+  <div style="margin-bottom:32px;">
+    <a href="{% url 'channels:connect' %}" class="btn btn-ghost btn-sm" style="margin-bottom:16px;">
+      <i class="bi bi-arrow-left"></i> Назад
+    </a>
+    <h2 style="font-size:22px; font-weight:700; margin-bottom:6px;">
+      <i class="bi bi-discord" style="color:#7289da;"></i> Подключение Discord
+    </h2>
+    <p class="text-soft">Авторизуйтесь через Discord и выберите сервер для модерации</p>
+  </div>
+
+  <div class="wizard-card">
+    <h3>Авторизация через Discord</h3>
+    <p class="wizard-sub">Нажмите кнопку ниже — вы будете перенаправлены на страницу Discord для выбора сервера и выдачи прав боту</p>
+
+    <ul class="instruction-list">
+      <li>
+        <div class="instruction-num">1</div>
+        <div>Нажмите «Добавить на Discord» ниже</div>
+      </li>
+      <li>
+        <div class="instruction-num">2</div>
+        <div>В окне Discord выберите ваш сервер и нажмите <strong>Авторизовать</strong></div>
+      </li>
+      <li>
+        <div class="instruction-num">3</div>
+        <div>Вернитесь сюда и зарегистрируйте сервер в дашборде</div>
+      </li>
+    </ul>
+
+    <div style="display:flex; gap:12px; flex-wrap:wrap;">
+      <a href="{{ discord_oauth_url|default:'#' }}" class="btn btn-lg"
+         style="background:rgba(114,137,218,0.15); border:1px solid rgba(114,137,218,0.4); color:#7289da;">
+        <i class="bi bi-discord" style="font-size:18px;"></i>
+        Добавить NexGuard на Discord
+      </a>
+    </div>
+
+    <div class="msg msg-info" style="margin-top:20px;">
+      <i class="bi bi-info-circle"></i>
+      После авторизации вернитесь в дашборд и добавьте канал вручную с платформой Discord и ID вашего сервера.
+    </div>
+
+    <div style="margin-top:24px;">
+      <a href="{% url 'channels:channel-create' %}?platform=discord" class="btn btn-secondary">
+        <i class="bi bi-plus-circle"></i> Уже добавил — зарегистрировать сервер
+      </a>
+    </div>
+  </div>
+</div>
+{% endif %}
+
+{% endblock %}
+
+{% block extra_js %}
+<script>
+function wizardNext(current) {
+  document.getElementById('wiz-step-' + current).style.display = 'none';
+  document.getElementById('wiz-step-' + (current + 1)).style.display = 'block';
+}
+
+function wizardPrev(current) {
+  document.getElementById('wiz-step-' + current).style.display = 'none';
+  document.getElementById('wiz-step-' + (current - 1)).style.display = 'block';
+}
+</script>
+{% endblock %}
